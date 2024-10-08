@@ -329,6 +329,14 @@ static void dwcmshc_reset(struct sdhci_host *host, u8 mask)
 {
 	sdhci_reset(host, mask);
 
+	/* The IP does not comply with the SDHCI specification
+	 * regarding the "Software Reset for CMD line should clear 'Command
+	 * Complete' in the Normal Interrupt Status Register." Clear the bit
+	 * here to compensate for this quirk.
+	 */
+	if (mask & SDHCI_RESET_CMD)
+		sdhci_writel(host, SDHCI_INT_RESPONSE, SDHCI_INT_STATUS);
+
 	if (mask & SDHCI_RESET_ALL) {
 		struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
 		struct dwcmshc_priv *priv = sdhci_pltfm_priv(pltfm_host);
