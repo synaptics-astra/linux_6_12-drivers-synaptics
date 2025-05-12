@@ -548,8 +548,6 @@ static int vidioc_venc_s_fmt_cap(struct file *file, void *priv,
 	}
 	ctx->vpu_dst_fmt = fmt;
 	ctx->dst_fmt = *pix_mp;
-	vpu_enc_ctrls_adjust_default(&ctx->v4l2_ctrls,
-				     ctx->dst_fmt.pixelformat);
 	vpu_enc_ctrls_h1_internal(ctx->enc_params);
 
 	return 0;

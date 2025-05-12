@@ -751,26 +751,6 @@ int vpu_enc_ctrls_v4l2_to_h1(struct vpu_enc_ctrls *enc_ctrls, u32 codec_fmt,
 	return 0;
 }
 
-int vpu_enc_ctrls_adjust_default(struct vpu_enc_ctrls *enc_ctrls, u32 codec_fmt)
-{
-	// Set to internal default value which is not in scope. This is for
-	// enabling internal algorithm to decide best value for these options,
-	// the default setting in V4L2 is just a fixed value that's not
-	// applicable for all codec types.
-	enc_ctrls->bitrate = 0;
-	enc_ctrls->h264_profile = 0;
-	enc_ctrls->h264_level = 0;
-	if (codec_fmt == V4L2_PIX_FMT_H264) {
-		enc_ctrls->h264_min_qp = 10;
-		enc_ctrls->h264_max_qp = 40;
-	} else if (codec_fmt == V4L2_PIX_FMT_VP8) {
-		enc_ctrls->vpx_min_qp = 0;
-		enc_ctrls->vpx_max_qp = 0;
-	}
-
-	return 0;
-}
-
 int vpu_enc_ctrls_h1_internal(struct syna_venc_strm_config *config)
 {
 	config->intraQpDelta = -5;
