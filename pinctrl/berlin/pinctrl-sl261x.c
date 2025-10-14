@@ -646,7 +646,7 @@ static const struct berlin_desc_group sl261x_sysmgr_pinctrl_groups[] = {
 			BERLIN_PINCTRL_FUNCTION(0x1, "uart1"), /* SM UART1 RXD */
 			BERLIN_PINCTRL_FUNCTION(0x2, "can0"), /* SM CAN0 RX */
 			BERLIN_PINCTRL_FUNCTION(0x3, "pwm"), /* SM PWM7 */
-			BERLIN_PINCTRL_FUNCTION(0x6, "uart1")), /* SM UART0 RXD */
+			BERLIN_PINCTRL_FUNCTION(0x6, "uart0")), /* SM UART0 RXD */
 	BERLIN_PINCTRLCONF_GROUP("SM_GPIO13", 0xc, 0x3, 0x06,
 			0x88, 10,
 			BERLIN_PINCTRL_FUNCTION(0x0, "gpio"), /* SM GPIO13 */
