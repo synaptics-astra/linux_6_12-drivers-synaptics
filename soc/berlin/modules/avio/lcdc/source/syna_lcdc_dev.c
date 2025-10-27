@@ -49,12 +49,13 @@ static void syna_lcdc_hw_param_update(struct syna_lcdc_dev *dev)
 
 static void syna_lcdc_semaintr_enable(int intr, int enable)
 {
+	HDL_semaphore *pSemHandle;
 	HDL_dhub2d *vpp_dhubHandle = SYNA_LCDC_VPP_DHUB_HANDLE;
 	if (NULL == vpp_dhubHandle) {
 		avio_error("invalid vpp dhub Handle\n");
 		return;
 	}
-	HDL_semaphore *pSemHandle = dhub_semaphore(&vpp_dhubHandle->dhub);
+	pSemHandle = dhub_semaphore(&vpp_dhubHandle->dhub);
 
 	semaphore_cfg(pSemHandle, intr, 1, 0);
 	semaphore_clr_full(pSemHandle, intr);
