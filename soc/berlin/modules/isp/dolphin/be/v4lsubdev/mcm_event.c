@@ -9,6 +9,7 @@
 
 #include <media/v4l2-device.h>
 #include <media/v4l2-event.h>
+#include <linux/delay.h>
 #include "mcm_event.h"
 #include "mcm_subdev.h"
 #include "vvcam_v4l2_common.h"
@@ -42,6 +43,8 @@ static bool mcm_event_subscribed(struct v4l2_subdev *sd,
 static int mcm_post_event(struct v4l2_subdev *sd, struct mcm_event_pkg *event_pkg)
 {
 	struct v4l2_event event;
+	int timeout_ms = 200000;
+	int i = 0;
 
 	memset(&event, 0, sizeof(event));
 
@@ -55,6 +58,23 @@ static int mcm_post_event(struct v4l2_subdev *sd, struct mcm_event_pkg *event_pk
 	}
 
 	v4l2_event_queue(sd->devnode, &event);
+
+	for (i = 0; i < timeout_ms; i++) {
+		if (event_pkg->ack) {
+			break;
+		}
+		usleep_range(5, 10);
+	}
+
+	if (event_pkg->ack == 0) {
+		dev_err(sd->dev, "post event %d time out\n", event.id);
+		return -EIO;
+	}
+
+	if (event_pkg->result) {
+		dev_err(sd->dev, "post event %d return error %d\n", event.id, event_pkg->result);
+		return -EINVAL;
+	}
 
 	return 0;
 }
