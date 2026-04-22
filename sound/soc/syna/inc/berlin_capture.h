@@ -7,14 +7,14 @@
 #include <sound/soc.h>
 
 #define SNDRV_CTL_NAME_IEC958_CAPTURE_SAMPLE_RATE \
-	"eARC_RX Audio Sample Frequency by pll"
-#define SNDRV_CTL_NAME_IEC958_CAPTURE_DEFAULT "IEC958 Capture Default"
+	"SPDIFIN Sample Rate"
+#define SNDRV_CTL_NAME_IEC958_CAPTURE_DEFAULT "SPDIFIN IEC958 Capture Default"
 
 void berlin_capture_set_ch_mode(struct snd_pcm_substream *substream,
 				u32 ch_num, u32 *chid, u32 mode,
 				bool enable_mic_mute, bool interleaved_mode,
 				bool dummy_data, bool multi_lanes, u32 channel_map,
-				bool ch_shift_check);
+				bool ch_shift_check, void * aio_handle);
 int berlin_capture_hw_free(struct snd_pcm_substream *substream);
 int berlin_capture_hw_params(struct snd_pcm_substream *substream,
 			     struct snd_pcm_hw_params *params);

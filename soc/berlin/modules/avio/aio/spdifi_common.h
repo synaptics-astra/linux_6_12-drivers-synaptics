@@ -5,6 +5,9 @@
 
 #include "aio.h"
 
+#define   SPDIFRX_STATUS_STATUS_BDET_LOCK                0x00400000
+#define   SPDIFRX_STATUS_STATUS_FPLL_STAT                0x01000000
+
 enum spdifi_fs {
 	SPDIFI_FS_32KHZ = 0,
 	SPDIFI_FS_44KHZ,
@@ -29,4 +32,5 @@ void aio_spdifi_config_reset(void *hd);
 void aio_spdifi_sw_reset(void *hd);
 int aio_spdifi_enable_sysclk(void *hd, bool enable);
 int aio_spdifi_enable_refclk(void *hd);
+int aio_spdifi_get_fs(void *hd);
 #endif

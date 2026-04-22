@@ -147,12 +147,12 @@ struct berlin_capture {
 	bool enable_mic_mute;
 	bool ch_shift_check; /* for dmic multi-channel shift check */
 
-	u8 spdif_channel_status[24];		/* 192 bits = 24 bytes for full block */
+	u8 spdif_channel_status[24];			/* 192 bits = 24 bytes for full block */
 	u8 spdif_channel_status_pending[24];	/* working copy, ISR-context only */
-	u32 spdif_bit_index;			/* Bit position in channel_status array */
-	u32 spdif_sample_rate;			/* 0 = unknown */
-	bool spdif_block_synced;		/* Track if we're synchronized to a valid B preamble */
-	bool spdif_csb_ready;			/* completed CSB block with changes */
+	u8 spdif_channel_status_completed[24];  /* snapshot of last completed block */
+	u32 spdif_bit_index;					/* Bit position in channel_status array */
+	bool spdif_block_synced;				/* Track if we're synchronized to a valid B preamble */
+	bool spdif_csb_ready;					/* completed CSB block with changes */
 
 	struct snd_kcontrol *spdif_rate_ctl;
 	struct snd_kcontrol *spdif_csb_ctl;
@@ -168,6 +168,8 @@ struct berlin_capture {
 	struct berlin_chip *chip;
 
 	void (*copy)(struct snd_pcm_substream *ss);
+
+	void *aio_handle;
 };
 
 static u32 bc_rates[] = {
@@ -195,7 +197,7 @@ static void berlin_capture_set_kcontrol(
 		return;
 
 	memset(&id, 0, sizeof(id));
-	id.iface = SNDRV_CTL_ELEM_IFACE_PCM;
+	id.iface = SNDRV_CTL_ELEM_IFACE_MIXER;
 	strscpy(id.name, name, sizeof(id.name));
 
 	*kctl = snd_ctl_find_id(rtd->card->snd_card, &id);
@@ -227,19 +229,17 @@ int berlin_capture_spdif_sample_rate_get(struct snd_kcontrol *kcontrol,
 				       struct snd_ctl_elem_value *ucontrol)
 {
 	struct berlin_capture *bc = (struct berlin_capture *)kcontrol->private_data;
-	unsigned long flags;
-	unsigned int sample_rate = 0;
+	int fs = 0;
 
 	if (!bc) {
 		ucontrol->value.integer.value[0] = 0;
 		return 0;
 	}
 
-	spin_lock_irqsave(&bc->lock, flags);
-	sample_rate = bc->spdif_sample_rate;
-	spin_unlock_irqrestore(&bc->lock, flags);
+	if (bc->mode == SPDIFI_MODE && bc->aio_handle)
+		fs = aio_spdifi_get_fs(bc->aio_handle);
 
-	ucontrol->value.integer.value[0] = sample_rate;
+	ucontrol->value.integer.value[0] = (fs > 0) ? fs : 0;
 
 	return 0;
 }
@@ -269,23 +269,10 @@ static void spdif_capture_state_reset(struct berlin_capture *bc)
 	memset(bc->spdif_channel_status, 0, sizeof(bc->spdif_channel_status));
 	memset(bc->spdif_channel_status_pending, 0,
 		sizeof(bc->spdif_channel_status_pending));
-	bc->spdif_sample_rate = 0;
+	memset(bc->spdif_channel_status_completed, 0,
+		sizeof(bc->spdif_channel_status_completed));
 	bc->spdif_block_synced = false;
 	bc->spdif_csb_ready = false;
-}
-
-static unsigned int spdif_decode_sample_rate(u8 fs_code)
-{
-	switch (fs_code) {
-	case 0x00: return 44100;
-	case 0x02: return 48000;
-	case 0x03: return 32000;
-	case 0x08: return 88200;
-	case 0x0A: return 96000;
-	case 0x0C: return 176400;
-	case 0x0E: return 192000;
-	default:   return 0;
-	}
 }
 
 static void berlin_spdif_snd_notify_work_fn(struct work_struct *work)
@@ -1222,6 +1209,12 @@ static __always_inline void process_spdif_channel_status(struct berlin_capture *
 
 		/* Check if we've completed a full 192-bit block */
 		if (bc->spdif_bit_index == SPDIF_BLOCK_SIZE) {
+			/* Snapshot completed block immediately so it isn't
+			* overwritten if another B preamble arrives later in
+			* the same period before spdif_copy() publishes. */
+			memcpy(bc->spdif_channel_status_completed,
+			bc->spdif_channel_status_pending,
+			sizeof(bc->spdif_channel_status_completed));
 			bc->spdif_csb_ready = true;
 
 			/* Reset for next block - will wait for next B preamble */
@@ -1294,13 +1287,11 @@ static void spdif_copy(struct snd_pcm_substream *ss)
 
 	/* schedule defered work to publish csb and notify only when csb changed*/
 	if (bc->spdif_csb_ready) {
-		bool changed = memcmp(bc->spdif_channel_status_pending,
+		bool changed = memcmp(bc->spdif_channel_status_completed,
 				      bc->spdif_channel_status,
 				      sizeof(bc->spdif_channel_status)) != 0;
-		memcpy(bc->spdif_channel_status, bc->spdif_channel_status_pending,
+		memcpy(bc->spdif_channel_status, bc->spdif_channel_status_completed,
 		       sizeof(bc->spdif_channel_status));
-		bc->spdif_sample_rate = spdif_decode_sample_rate(
-			bc->spdif_channel_status[3] & 0x0F);
 		bc->spdif_csb_ready = false;
 		if (changed)
 			schedule_work(&bc->spdif_snd_notify_work);
@@ -1320,7 +1311,7 @@ void berlin_capture_set_ch_mode(struct snd_pcm_substream *ss,
 				u32 chid_num, u32 *chid, u32 mode,
 				bool enable_mic_mute, bool interleaved_mode,
 				bool dummy_data, bool multi_lanes, u32 channel_map,
-				bool ch_shift_check)
+				bool ch_shift_check, void * aio_handle)
 {
 	struct snd_pcm_runtime *runtime = ss->runtime;
 	struct berlin_capture *bc = runtime->private_data;
@@ -1338,6 +1329,7 @@ void berlin_capture_set_ch_mode(struct snd_pcm_substream *ss,
 		bc->enable_mic_mute = enable_mic_mute;
 		bc->channel_map = channel_map;
 		bc->ch_shift_check = ch_shift_check;
+		bc->aio_handle = aio_handle;
 		snd_printd(
 			"capture chnum %d mode %d interleaved %d dummy_data %d\n",
 			chid_num, mode, interleaved_mode, dummy_data);
@@ -1752,6 +1744,7 @@ int berlin_capture_open(struct snd_pcm_substream *ss)
 	if (err < 0)
 		return -EINVAL;
 
+	bc->aio_handle = NULL;
 	bc->dma_pending = false;
 	bc->capturing = false;
 	bc->pages_allocated = false;
@@ -1841,6 +1834,10 @@ int berlin_capture_close(struct snd_pcm_substream *ss)
 
 		spin_lock_irq(&bc->lock);
 		spdif_capture_state_reset(bc);
+		if (bc->spdif_rate_ctl)
+			bc->spdif_rate_ctl->private_data = NULL;
+		if (bc->spdif_csb_ctl)
+			bc->spdif_csb_ctl->private_data = NULL;
 		bc->spdif_rate_ctl = NULL;
 		bc->spdif_csb_ctl = NULL;
 		spin_unlock_irq(&bc->lock);

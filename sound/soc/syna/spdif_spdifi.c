@@ -98,6 +98,7 @@ static int spdifi_hw_params(struct snd_pcm_substream *ss,
 	ssparams.dev_name = spdifi->dev_name;
 	ssparams.interleaved = false;
 	ssparams.dummy_data = false;
+	ssparams.aio_handle = spdifi->aio_handle;
 	ret = berlin_pcm_request_dma_irq(ss, &ssparams);
 	if (ret == 0)
 		spdifi->irq_requested = true;

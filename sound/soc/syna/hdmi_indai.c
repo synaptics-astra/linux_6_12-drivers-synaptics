@@ -212,7 +212,8 @@ static int berlin_indai_hw_params(struct snd_pcm_substream *substream,
 			ssparams.dummy_data,
 			ssparams.multi_lanes,
 			0,
-			0);
+			0,
+			hdmi->aio_handle);
 
 	hdmi->channels = params_channels(params);
 

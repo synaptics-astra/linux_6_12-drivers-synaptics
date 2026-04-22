@@ -135,6 +135,76 @@ static int spdifi_set_fs(struct aio_priv *aio, u32 fs)
 	return 0;
 }
 
+int aio_spdifi_get_fs(void *hd) {
+	u32 val;
+	u32 period0, period1, period_avg;
+	u32 fs;
+	struct aio_priv *aio = hd_to_aio(hd);
+
+	if (unlikely(!aio)) {
+		pr_err("Invalid aio handle\n");
+		return -EINVAL;
+	}
+
+	val = aio_read(aio, RA_AIO_SPDIFRX_STATUS + RA_SPDIFRX_STATUS_STATUS);
+	if ((val & SPDIFRX_STATUS_STATUS_BDET_LOCK) !=
+			SPDIFRX_STATUS_STATUS_BDET_LOCK ||
+			(val & SPDIFRX_STATUS_STATUS_FPLL_STAT) != 0) {
+		pr_err("BDET/FPLL not locked, status(0x%08x)\n", val);
+		return -EINVAL;
+	}
+
+	/* Extract periods */
+	period0 = val & 0xFF;           // Bits [7:0]
+	period1 = (val >> 8) & 0xFF;    // Bits [15:8]
+
+	if (period0 == 0 || period1 == 0) {
+	    pr_err("Invalid PERIOD: P0=%u, P1=%u\n", period0, period1);
+	    return -EINVAL;
+	}
+
+	/* Average and round up */
+	period_avg = (period0 + period1 + 1) / 2;
+
+	/*
+	* fs = (400MHz / period_avg) / 2(BMC) / 2(Channel) / 32(Bit Depth)
+	*     = 400000000 / period_avg / 128
+	*     = 3125000 / period_avg
+	*/
+	fs = 3125000 / period_avg;
+
+	pr_debug("P0=%u, P1=%u, AVG=%u, fs=%u\n",
+	    period0, period1, period_avg, fs);
+
+	/*
+	 * Round to nearest standard rate
+	 * Snap to nearest standard rate.  Use midpoints where adjacent
+	 * rates are close (44.1/48, 88.2/96, 176.4/192 kHz) and ~5 %
+	 * windows elsewhere and narrow the ranges.
+	 */
+	if (fs >= 30400 && fs < 38050)
+		fs = 32000;
+	else if (fs >= 38050 && fs < 46050)
+		fs = 44100;
+	else if (fs >= 46050 && fs < 50400)
+		fs = 48000;
+	else if (fs >= 83790 && fs < 92100)
+		fs = 88200;
+	else if (fs >= 92100 && fs < 100800)
+		fs = 96000;
+	else if (fs >= 167580 && fs < 184200)
+		fs = 176400;
+	else if (fs >= 184200 && fs < 201600)
+		fs = 192000;
+	else {
+		pr_err_ratelimited("recovered fs %u outside valid range\n", fs);
+		return -EINVAL;
+	}
+
+	return (int)fs;
+}
+EXPORT_SYMBOL(aio_spdifi_get_fs);
+
 static int aio_spdifi_wait_lock(struct aio_priv *aio, u32 timeout)
 {
 	u32 address;
@@ -152,7 +222,9 @@ static int aio_spdifi_wait_lock(struct aio_priv *aio, u32 timeout)
 			return -ETIMEDOUT;
 		}
 		val = aio_read(aio, address);
-	} while (((val&0x400000) != 0x400000) || ((val&0x1000000) != 0));
+	} while (((val & SPDIFRX_STATUS_STATUS_BDET_LOCK) !=
+			SPDIFRX_STATUS_STATUS_BDET_LOCK) ||
+			((val & SPDIFRX_STATUS_STATUS_FPLL_STAT) != 0));
 	return 0;
 }
 

@@ -207,7 +207,8 @@ int berlin_pcm_request_dma_irq(struct snd_pcm_substream *substream,
 					   params->dummy_data,
 					   params->multi_lanes,
 					   params->channel_map,
-					   params->ch_shift_check);
+					   params->ch_shift_check,
+					   params->aio_handle);
 	else if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
 		berlin_playback_set_ch_mode(substream, chid_num, ch,
 					    params->mode, params->dai_fmt);
@@ -224,7 +225,7 @@ void berlin_pcm_free_dma_irq(struct snd_pcm_substream *substream,
 
 	if (substream->stream == SNDRV_PCM_STREAM_CAPTURE)
 		berlin_capture_set_ch_mode(substream, 0, 0, 0,
-					false, false, false, false, 0, 0);
+					false, false, false, false, 0, 0, NULL);
 	else if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
 		berlin_playback_set_ch_mode(substream, 0, 0, 0, 0);
 
@@ -279,11 +280,11 @@ void berlin_pcm_set_ch_mode(struct snd_pcm_substream *ss,
 	u32 chid_num, u32 *chid, u32 mode,
 	bool enable_mic_mute, bool interleaved_mode,
 	bool dummy_data, bool multi_lanes, u32 channel_map,
-	bool ch_shift_check)
+	bool ch_shift_check, void * aio_handle)
 {
 	return berlin_capture_set_ch_mode(ss, chid_num, chid, mode,
 		enable_mic_mute, interleaved_mode, dummy_data, multi_lanes, channel_map,
-		ch_shift_check);
+		ch_shift_check, aio_handle);
 }
 EXPORT_SYMBOL(berlin_pcm_set_ch_mode);
 
@@ -588,21 +589,21 @@ static int berlin_pcm_hdmi_spdif_out_switch_put(
 
 static struct snd_kcontrol_new berlin_pcm_controls[] = {
 	{
-		.iface = SNDRV_CTL_ELEM_IFACE_PCM,
+		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 		.name = SNDRV_CTL_NAME_IEC958("", PLAYBACK, SWITCH),
 		.info = snd_ctl_boolean_mono_info,
 		.get = berlin_pcm_hdmi_spdif_out_switch_get,
 		.put = berlin_pcm_hdmi_spdif_out_switch_put,
 	},
 	{
-		.iface = SNDRV_CTL_ELEM_IFACE_PCM,
+		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 		.name = SNDRV_CTL_NAME_IEC958_CAPTURE_SAMPLE_RATE,
 		.access = SNDRV_CTL_ELEM_ACCESS_READ | SNDRV_CTL_ELEM_ACCESS_VOLATILE,
 		.info = berlin_capture_spdif_sample_rate_info,
 		.get = berlin_capture_spdif_sample_rate_get,
 	},
 	{
-		.iface = SNDRV_CTL_ELEM_IFACE_PCM,
+		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 		.name = SNDRV_CTL_NAME_IEC958_CAPTURE_DEFAULT,
 		.access = SNDRV_CTL_ELEM_ACCESS_READ | SNDRV_CTL_ELEM_ACCESS_VOLATILE,
 		.info = berlin_capture_spdif_control_status_buffer_info,
