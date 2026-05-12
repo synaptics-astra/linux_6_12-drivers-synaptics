@@ -575,7 +575,7 @@ static void syna_vpp_post_process_init_cb(struct drm_device *dev, int crtcID, in
 	int i, fl_freed_count;
 
 	/* Handle fbconsole delayed start initialization */
-	if (dev_priv->is_fb_delayed_start && !dev_priv->is_fbconsole_enabled) {
+	if (dev_priv->is_fb_delayed_start && !dev_priv->is_fbconsole_enabled && !dev_priv->fbcon_start_work) {
 		fbcon_start_work_temp =
 			kmalloc(sizeof(SYNA_FBCON_START_WORK), GFP_KERNEL);
 
