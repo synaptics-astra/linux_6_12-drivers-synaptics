@@ -109,7 +109,7 @@ static int i2s_hdmi_loopback_hw_params(struct snd_pcm_substream *ss,
 				struct snd_soc_dai *dai)
 {
 	struct hdmi_lpbk_priv *lpbk = snd_soc_dai_get_drvdata(dai);
-	struct berlin_ss_params ssparams;
+	struct berlin_ss_params ssparams = {};
 	int ret;
 
 	aio_set_loopback_clk_gate(lpbk->aio_handle,

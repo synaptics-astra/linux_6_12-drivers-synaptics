@@ -112,7 +112,7 @@ static int i2s_mic2_hw_params(struct snd_pcm_substream *ss,
 	u32 chnum = params_channels(params);
 	const struct mclk_info *mclk = NULL;
 	unsigned int dfm, cfm, bclk;
-	struct berlin_ss_params ssparams;
+	struct berlin_ss_params ssparams = {};
 	struct aud_ctrl ctrl;
 	/* 00: Master mode and I2S1_LRCKIO_DO_FB (clock)
 	 * 01: Slave mode and I2S1_LRCKIO_DI_2mux (from PinMux) (clock)

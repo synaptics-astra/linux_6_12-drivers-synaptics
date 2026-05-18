@@ -129,7 +129,7 @@ static int i2s_mic6_hw_params(struct snd_pcm_substream *ss,
 	struct mic6_priv *mic6 = snd_soc_dai_get_drvdata(dai);
 	int ret;
 	u32 dfm;
-	struct berlin_ss_params ssparams;
+	struct berlin_ss_params ssparams = {};
 	struct aud_ctrl ctrl;
 
 	mic6->channels = params_channels(params);

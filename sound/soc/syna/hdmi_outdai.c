@@ -917,7 +917,7 @@ static int berlin_outdai_hw_params(struct snd_pcm_substream *substream,
 	struct hdmi_priv *hdmi = snd_soc_dai_get_drvdata(dai);
 	u32 fs = params_rate(params);
 	int ret = 0;
-	struct berlin_ss_params ssparams;
+	struct berlin_ss_params ssparams = {};
 	const struct mclk_info *mclk = NULL;
 
 	ssparams.irq_num = 1;

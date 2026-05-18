@@ -245,7 +245,7 @@ static int i2s_sec_hw_params(struct snd_pcm_substream *substream,
 	int ret;
 	u32 fs = params_rate(params);
 	const struct mclk_info *mclk = NULL;
-	struct berlin_ss_params ssparams;
+	struct berlin_ss_params ssparams = {};
 
 	snd_printd("%s\n", __func__);
 

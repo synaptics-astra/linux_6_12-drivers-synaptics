@@ -7,7 +7,8 @@
 #include <sound/soc.h>
 
 void berlin_playback_set_ch_mode(struct snd_pcm_substream *ss,
-									u32 ch_num, u32 *ch, u32 mode, u32 dai_fmt);
+		u32 ch_num, u32 *ch, u32 mode, u32 dai_fmt,
+		void (*dai_stop_fn)(void *), void *dai_stop_data);
 void berlin_playback_set_volume_db(struct snd_pcm_substream *ss,
 								   u32 mode, int volume_db);
 int berlin_playback_hw_free(struct snd_pcm_substream *ss);

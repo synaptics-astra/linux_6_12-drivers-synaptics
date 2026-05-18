@@ -88,7 +88,7 @@ static int spdifi_hw_params(struct snd_pcm_substream *ss,
 {
 	struct spdifi_priv *spdifi = snd_soc_dai_get_drvdata(dai);
 	u32 fs = params_rate(params), width = params_width(params);
-	struct berlin_ss_params ssparams;
+	struct berlin_ss_params ssparams = {};
 	int ret = 0;
 
 	/* Trigger spdif reset as h/w init */

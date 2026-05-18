@@ -430,7 +430,7 @@ static int i2s_soc_dai_hw_params(struct snd_pcm_substream *substream,
 	u32 fs = params_rate(params), chnum = params_channels(params);
 	u32 mode = 0;
 	int ret, width = params_width(params);
-	struct berlin_ss_params ssparams;
+	struct berlin_ss_params ssparams = {};
 	struct aud_clk *pClkrt = NULL;
 
 	i2s_ctrl->clkrt = NULL;

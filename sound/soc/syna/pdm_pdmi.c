@@ -37,7 +37,7 @@ static int pdm_pdmi_hw_params(struct snd_pcm_substream *ss,
 	struct pdm_pdmi_priv *pdmi = snd_soc_dai_get_drvdata(dai);
 	u32 fs = params_rate(params), chid_num;
 	int ret = 0, i;
-	struct berlin_ss_params ssparams;
+	struct berlin_ss_params ssparams = {};
 
 	/* AVPLL configuration */
 	//aio_set_pll(fs, 4, 0);

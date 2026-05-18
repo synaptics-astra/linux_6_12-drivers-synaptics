@@ -281,7 +281,7 @@ static int dmic_pdm_hw_params(struct snd_pcm_substream *ss,
 	struct dmic_data *dmic = snd_soc_dai_get_drvdata(dai);
 	u32 fs = params_rate(params);
 	int ret = 0, i, apllclk, config_index;
-	struct berlin_ss_params ssparams;
+	struct berlin_ss_params ssparams = {};
 	bool left, right;
 
 	snd_printd("%s: ss(0x%p) dai(0x%p)\n", __func__, ss, dai);

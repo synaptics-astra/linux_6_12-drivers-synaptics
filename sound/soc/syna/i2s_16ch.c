@@ -46,6 +46,7 @@ struct i2s_dai_priv {
 	u32 fs;
 	void *aio_handle;
 	struct i2s_ch_irq_priv io_params[AIO_I2S_IO_MAX];
+	int stream_dir;
 };
 
 static void i2s_ch_flush(void *aio_handle, struct i2s_ch_irq_priv *i2s_ctrl, bool en, u32 start)
@@ -121,6 +122,30 @@ static void i2s_enable_rxport(void *aio_handle, struct i2s_ch_irq_priv *i2s_ctrl
 	}
 }
 
+/*
+ * Called synchronously from berlin_playback_trigger_stop after DHub
+ * channel clear.  Disables the TX/RX port and flushes the AIO FIFO
+ * now that DMA is stopped and safe to flush without deadlock.
+ * Flush is immediately deasserted so the FIFO is ready for the
+ * next trigger start.
+ */
+static void i2s_port_disable_cb(void *data)
+{
+	struct i2s_dai_priv *i2s_dai = data;
+	struct i2s_ch_irq_priv *i2s_ctrl = &i2s_dai->io_params[AIO_I2S_IO_TX];
+	u32 start = i2s_ctrl->irqc - i2s_dai->active_tdms;
+
+	if (!i2s_dai->continuous_clk) {
+		if (i2s_dai->stream_dir == SNDRV_PCM_STREAM_PLAYBACK)
+			i2s_enable_txport(i2s_dai->aio_handle, i2s_ctrl, 0, start);
+		else if (i2s_dai->stream_dir == SNDRV_PCM_STREAM_CAPTURE)
+			i2s_enable_rxport(i2s_dai->aio_handle, i2s_ctrl, 0, start);
+	}
+
+	i2s_ch_flush(i2s_dai->aio_handle, i2s_ctrl, 1, start);
+	udelay(1); /* Safe to ensure flush assert and then deassert */
+	i2s_ch_flush(i2s_dai->aio_handle, i2s_ctrl, 0, start);
+}
 
 static struct snd_kcontrol_new berlin_i2s_ctrls[] = {
 	//TODO: add dai control here
@@ -364,6 +389,7 @@ static int berlin_i2s_startup(struct snd_pcm_substream *substream,
 
 	snd_printk("i2s start...\n");
 	aio_setirq(i2s_dai->aio_handle, 0, 0, 0, 0, 0);
+	i2s_dai->stream_dir = substream->stream;
 	return 0;
 }
 
@@ -500,7 +526,7 @@ static int berlin_i2s_hw_params(struct snd_pcm_substream *substream,
 	u32 fs = params_rate(params), chnum = params_channels(params);
 	const struct mclk_info *mclk = NULL;
 	int ret;
-	struct berlin_ss_params ssparams;
+	struct berlin_ss_params ssparams = {};
 	u32 tdm_start;
 
 	if ((!(i2s_dai->mode & I2SO_MODE)) && (!(i2s_dai->mode & I2SI_MODE))) {
@@ -524,6 +550,9 @@ static int berlin_i2s_hw_params(struct snd_pcm_substream *substream,
 	ssparams.mode = I2SO_MODE;
 	ssparams.irq = (unsigned int *)&i2s_ctrl->irqn[i2s_ctrl->irqc - i2s_dai->active_tdms];
 	ssparams.dev_name = i2s_dai->dev_name;
+	ssparams.dai_stop_fn = i2s_port_disable_cb;
+	ssparams.dai_stop_data = i2s_dai;
+
 	ret = berlin_pcm_request_dma_irq(substream, &ssparams);
 	if (ret == 0)
 		i2s_dai->i2s_requested = true;
@@ -579,6 +608,7 @@ static int berlin_i2s_hw_params(struct snd_pcm_substream *substream,
 	i2s_set_aio(i2s_dai, substream->stream, fs, params_width(params), chnum,
 		    mclk->mclkrate, i2s_dai->active_tdms);
 	i2s_ch_en(i2s_dai->aio_handle, i2s_ctrl, 1, tdm_start);
+	aio_set_i2s_ch_en(AIO_ID_SEC_TX, 1);
 
 	snd_printd("i2s hw ready\n");
 	return ret;
@@ -615,6 +645,7 @@ static int berlin_i2s_hw_free(struct snd_pcm_substream *substream,
 	i2s_iosel_set_bclk(i2s_dai->aio_handle, i2s_ctrl, 0, i2s_dai->ctrl.invbclk, 0);
 	i2s_iosel_set_fsync(i2s_dai->aio_handle, i2s_ctrl, 0, i2s_dai->ctrl.invfs, 0);
 	i2s_set_mclk_src(i2s_dai->aio_handle, i2s_ctrl, mclk->d3_switch, mclk->plldiv, mclk->apll_id, 0, 0);
+	aio_set_i2s_ch_en(AIO_ID_SEC_TX, 0);
 	return 0;
 }
 
@@ -639,14 +670,8 @@ static int berlin_i2s_trigger(struct snd_pcm_substream *substream,
 	case SNDRV_PCM_TRIGGER_STOP:
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
-		if (!i2s_dai->continuous_clk) {
-			if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
-				i2s_enable_txport(i2s_dai->aio_handle, i2s_ctrl, 0, start);
+		if (!i2s_dai->continuous_clk)
 			i2s_ch_mute(i2s_dai->aio_handle, i2s_ctrl, 1, start);
-		}
-
-		if (substream->stream == SNDRV_PCM_STREAM_CAPTURE)
-			i2s_enable_rxport(i2s_dai->aio_handle, i2s_ctrl, 0, start);
 		break;
 	default:
 		return -EINVAL;

@@ -150,6 +150,9 @@ struct berlin_playback {
 	 */
 	atomic_t hdmi_volume_db;
 	atomic_t spdif_volume_db;
+
+	void (*dai_stop_fn)(void *);
+	void *dai_stop_data;
 };
 
 //Sample rate fixed to 48k now, avpll setting
@@ -429,6 +432,9 @@ static void berlin_playback_trigger_stop(struct snd_pcm_substream *ss)
 		DhubChannelClear(bp->chip->dhub, chid, 0);
 		channel_enable(bp->chip->dhub, chid, false);
 	}
+
+	if (bp->dai_stop_fn)
+		bp->dai_stop_fn(bp->dai_stop_data);
 
 	//dHub channel is cleared and disabled, so clear DMA pending flag
 	if (bp->output_mode & I2SO_MODE)
@@ -1608,7 +1614,8 @@ berlin_direct_playback_transfer(struct snd_pcm_substream *substream,
 }
 
 void berlin_playback_set_ch_mode(struct snd_pcm_substream *ss,
-				 u32 ch_num, u32 *ch, u32 mode, u32 dai_fmt)
+				 u32 ch_num, u32 *ch, u32 mode, u32 dai_fmt,
+				 void (*dai_stop_fn)(void *), void *dai_stop_data)
 {
 	struct snd_pcm_runtime *runtime = ss->runtime;
 	struct berlin_playback *bp = runtime->private_data;
@@ -1656,6 +1663,8 @@ void berlin_playback_set_ch_mode(struct snd_pcm_substream *ss,
 			return;
 		}
 		bp->output_mode |= mode;
+		bp->dai_stop_fn = dai_stop_fn;
+		bp->dai_stop_data = dai_stop_data;
 	}
 }
 

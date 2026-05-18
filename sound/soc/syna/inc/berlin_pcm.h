@@ -93,6 +93,8 @@ struct berlin_ss_params {
 	unsigned int *irq;
 	const char *dev_name;
 	void *aio_handle;
+	void (*dai_stop_fn)(void *);
+	void *dai_stop_data;
 };
 
 struct iec61937_burst_header {

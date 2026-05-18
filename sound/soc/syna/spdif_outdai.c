@@ -207,7 +207,7 @@ static int berlin_outdai_hw_params(struct snd_pcm_substream *substream,
 	u32 fs = params_rate(params);
 	const struct mclk_info *mclk = NULL;
 	int ret;
-	struct berlin_ss_params ssparams;
+	struct berlin_ss_params ssparams = {};
 
 	if (aio_i2s_get_mclk_cfg(fs, 32, &mclk) && !mclk) {
 		snd_printk("fail to get mclk config");

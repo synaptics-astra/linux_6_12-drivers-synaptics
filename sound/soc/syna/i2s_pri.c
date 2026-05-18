@@ -334,7 +334,7 @@ static int berlin_outdai_hw_params(struct snd_pcm_substream *substream,
 	u32 fs = params_rate(params), chnum = params_channels(params);
 	const struct mclk_info *mclk = NULL;
 	int ret;
-	struct berlin_ss_params ssparams;
+	struct berlin_ss_params ssparams = {};
 
 	if (!(outdai->mode & I2SO_MODE)) {
 		dev_err(outdai->dev, "not in i2s mode, fatal error.\n");

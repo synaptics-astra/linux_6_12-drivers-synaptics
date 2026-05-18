@@ -223,7 +223,7 @@ static int i2s_mic1_hw_params(struct snd_pcm_substream *ss,
 	u32 dfm, cfm, bclk;
 	struct aud_ctrl ctrl;
 	int ret;
-	struct berlin_ss_params ssparams;
+	struct berlin_ss_params ssparams = {};
 	u32 xfeed = 0; // Clock cross feed
 
 	/* Change AIO_24DFM to AIO_32DFM */
