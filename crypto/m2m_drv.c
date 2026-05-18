@@ -36,10 +36,10 @@
 #include "m2m_wrapper.h"
 #if !IS_ENABLED(CONFIG_OPTEE)
 #include "tz_driver.h"
+#include "tsp.h"
 #else
 #include <linux/tee_drv.h>
 #endif
-#include "tsp.h"
 #include <uapi/bm.h>
 #include "m2m_kernel_compatibility_wrap.h"
 
@@ -624,15 +624,6 @@ static int m2m_drv_open(struct inode *inode, struct file *file)
 		} else {
 			pr_debug("m2m request_irq success\n");
 			M2M_REG_WORD32_WRITE(RA_TspIntReg_software_int_enable, 0xffff);
-		}
-
-		ret = tz_tsp_load_firmware(m2m_device.dev, DEFAULT_FIGO_NUM,
-							DEFAULT_TSPFW_IDX, false);
-		if (ret) {
-			pr_err("tz_tsp_load_firmware failed.\n");
-			free_irq(m2m_device.irq_num, (void *)&m2m_device);
-			m2m_session_destroy(sess);
-			atomic_dec_return(&m2m_device.m2m_sess_refcnt);
 		}
 	}
 
