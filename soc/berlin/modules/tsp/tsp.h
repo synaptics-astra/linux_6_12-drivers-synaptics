@@ -23,6 +23,8 @@
 #include <linux/semaphore.h>
 #include <linux/cdev.h>
 #include "kernel_compatibility.h"
+#include <linux/firmware.h>
+#include <linux/completion.h>
 #include "drv_msg.h"
 
 #define     TSP_ISR_MSGQ_SIZE                              32
@@ -59,9 +61,6 @@
 #define TSP_MAX_DEVS            2
 #define TSP_MINOR               0
 
-#define DEFAULT_FIGO_NUM 	0
-#define DEFAULT_TSPFW_IDX 	1
-
 #define TSP_IOCTL_CMD_MSG       _IOW('t', 1, int[2])
 #define TSP_IOCTL_GET_MSG       _IOR('t', 2, CC_MSG_t)
 #define TSP_IOCTL_DISABLE_INT   _IO('t', 3)
@@ -86,6 +85,13 @@ struct tsp_device_t {
 	struct class *dev_class;
 	int major;
 	int minor;
+};
+
+struct tsp_firmware_info {
+	void *data;
+	size_t size;
+	bool loaded;
+	struct completion fw_completion;
 };
 
 enum clk_setting {
@@ -119,7 +125,5 @@ int tz_tsp_get_figo_state(uint32_t figo_id, uint32_t *state);
 #if !IS_ENABLED(CONFIG_OPTEE)
 bool tz_get_tsp_ta_status(void);
 #endif
-
-int tz_tsp_request_firmware(struct device *dev);
-int tz_tsp_release_firmware(void);
-int tz_tsp_load_firmware(struct device *dev, int figo_id, int fw_idx, bool force_load);
+int tz_tsp_load_firmware(struct device *dev, const struct tsp_firmware_info fw_info,
+				int figo_id, int fw_idx, bool force_load);

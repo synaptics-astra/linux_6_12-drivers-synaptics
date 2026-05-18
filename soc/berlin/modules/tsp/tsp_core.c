@@ -23,6 +23,11 @@ static struct tsp_device_t tsp_dev = {
 	.minor = TSP_MINOR,
 };
 
+static struct tsp_firmware_info g_tsp_fw_info;
+
+#define FIRMWARE_IMG_TSP        "fw/tsp.fw"
+#define DEFAULT_FIGO_NUM 	0
+#define DEFAULT_TSPFW_IDX 	1
 /*
  * Module internal function
  */
@@ -30,6 +35,47 @@ static struct tsp_device_t tsp_dev = {
 	writel_relaxed(((unsigned int)(data)), ((addr) + tsp_virt_addr))
 #define TSP_REG_WORD32_READ(offset, holder)	\
 	(*(holder) = readl_relaxed((offset) + tsp_virt_addr))
+
+static void load_firmware_callback(const struct firmware *fw, void *context)
+{
+	struct device *dev = (struct device *)context;
+	int res;
+
+	if (!fw) {
+		/* if no tsp.fw found at rootfs, means TSP TA would load tsp.fw inside TSP TA.*/
+		pr_info("Firmware request failed, need TA load by itself\n");
+	} else {
+		/* Save firmware to cache, at resume stage directly passed cache fw. Because:
+		* 1. benifits the performance of suspend/resume
+		* 2. There exists a hang issue when request firmware at suspend
+		* 3. This will bring some memory overhead, but the memory is small
+		* (tsp.fw size is around 128KB)
+		*/
+		g_tsp_fw_info.data = kmalloc(fw->size, GFP_KERNEL);
+		if (!g_tsp_fw_info.data) {
+			pr_err("can't allocate memory for firmware caching\n");
+			goto out;
+		}
+		g_tsp_fw_info.size = fw->size;
+		memcpy((void *)g_tsp_fw_info.data, fw->data, fw->size);
+	}
+	res = tz_tsp_load_firmware(dev, g_tsp_fw_info, DEFAULT_FIGO_NUM, DEFAULT_TSPFW_IDX, false);
+	if (res) {
+		pr_err("Firmware load failed: %d\n", res);
+		if (g_tsp_fw_info.data) {
+			kfree(g_tsp_fw_info.data);
+			memset(&g_tsp_fw_info, 0, sizeof(g_tsp_fw_info));
+		}
+		goto out;
+	}
+
+	g_tsp_fw_info.loaded = true;
+	pr_info("Firmware loaded successfully\n");
+	complete_all(&g_tsp_fw_info.fw_completion);
+out:
+	if (fw)
+		release_firmware(fw);
+}
 
 static irqreturn_t tsp_devices_isr(int irq, void *dev_id)
 {
@@ -243,7 +289,11 @@ static int berlin_tsp_resume(struct device *dev)
 	 * after resume, SRAM is cleared, but DDR is not affected,
 	 * So need to force TA to reload tsp.fw after resume.
 	*/
-	ret = tz_tsp_load_firmware(dev, DEFAULT_FIGO_NUM,
+	if (!g_tsp_fw_info.loaded) {
+		pr_err("Firmware init loaded failed, directly return\n");
+		return 0;
+	}
+	ret = tz_tsp_load_firmware(dev, g_tsp_fw_info, DEFAULT_FIGO_NUM,
 					DEFAULT_TSPFW_IDX, true);
 	if (ret) {
 		pr_err("tz_tsp_load_firmware failed.\n");
@@ -318,11 +368,23 @@ static int tsp_driver_open(struct inode *inode, struct file *filp)
 
 	pr_info("Start open tsp driver!\n");
 
+	err = wait_for_completion_interruptible_timeout(&g_tsp_fw_info.fw_completion, msecs_to_jiffies(100));
+	if (err == 0) {
+		pr_err("timeout for wait_for_completion\n");
+		return -ENODEV;
+	} else if (err < 0) {
+		pr_info("interrupted\n");
+		return -EAGAIN;
+	} else {
+		pr_info("Firmware loaded\n");
+	}
+
 	if (atomic_inc_return(&tsp_dev_refcnt) > 1) {
 		pr_info("tsp driver reference count %d!\n",
 			 atomic_read(&tsp_dev_refcnt));
 		return 0;
 	}
+
 	err = request_irq(tsp_irq, tsp_devices_isr, IRQF_SHARED,
 			  "tsp_module", (void *)&(tsp_dev.TspCtx));
 	if (unlikely(err < 0)) {
@@ -491,7 +553,8 @@ static long tsp_driver_ioctl_unlocked(struct file *filp,
 				pr_err("invalid figo id %d\n", fw_info[0]);
 				return -EINVAL;
 			}
-			return tz_tsp_load_firmware(tsp_dev.dev, fw_info[0], fw_info[1], false);
+
+			return tz_tsp_load_firmware(tsp_dev.dev, g_tsp_fw_info, fw_info[0], fw_info[1], false);
 		}
 	default:
 		return -EINVAL;
@@ -638,14 +701,14 @@ static int berlin_tsp_probe(struct platform_device *pdev)
 
 	tsp_dev.dev = &pdev->dev;
 
-	/* request firmware here instead of at suspend, and at resume stage,
-	* directly passed cache fw. Because:
-	 * 1. benifits the performance of suspend/resume
-	 * 2. There exists a hang issue when request firmware at suspend
-	 * 3. This will bring some memory overhead, but the memory is small
-	 * (tsp.fw size is around 128KB)
-	 */
-	res = tz_tsp_request_firmware(&pdev->dev);
+	init_completion(&g_tsp_fw_info.fw_completion);
+	res = request_firmware_nowait(THIS_MODULE, true, FIRMWARE_IMG_TSP,
+					&pdev->dev, GFP_KERNEL,
+					&pdev->dev, load_firmware_callback);
+	if (res) {
+		pr_err("request_firmware_nowait failed: %d\n", res);
+	}
+
 	pr_info("berlin_tsp_probe OK\n");
 
 	return 0;
@@ -664,7 +727,11 @@ err_prob_device_3:
 static RET_TYPE berlin_tsp_remove(struct platform_device *pdev)
 {
 	pr_info("tsp_remove\n");
-	tz_tsp_release_firmware();
+	if (g_tsp_fw_info.data) {
+		kfree(g_tsp_fw_info.data);
+		memset(&g_tsp_fw_info, 0, sizeof(g_tsp_fw_info));
+	}
+	tz_tsp_finalize();
 	tsp_drv_exit(&tsp_dev);
 	unregister_chrdev_region(MKDEV(tsp_dev.major, 0), TSP_MAX_DEVS);
 	pr_info("unregister cdev device major [%d]\n", tsp_dev.major);

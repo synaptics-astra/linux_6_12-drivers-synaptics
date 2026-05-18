@@ -4,12 +4,9 @@
  */
 #include "tsp.h"
 #include "tee_client_api.h"
-#include <linux/firmware.h>
 #include <linux/dma-mapping.h>
 #include <linux/slab.h>
 #define TA_IMG_PATH_TSP      	"ta/libtsp.ta"
-#define FIRMWARE_IMG_TSP        "fw/tsp.fw"
-const struct firmware *g_tsp_fw;
 
 static const TEEC_UUID ta_tsp_uuid = {0x1316a183, 0x894d, 0x43fe, \
 	{0x98, 0x93, 0xbb, 0x94, 0x6a, 0xe1, 0x03, 0xe8} };
@@ -88,60 +85,26 @@ free_fw:
 }
 
 
-int tz_tsp_request_firmware(struct device *dev)
+int tz_tsp_load_firmware(struct device *dev, const struct tsp_firmware_info fw_info,
+						int figo_id, int fw_idx, bool force_load)
 {
-	int ret;
-
-	if (g_tsp_fw) {
-		pr_info("firmware already requested\n");
-		return 0;
-	}
-	ret = request_firmware(&g_tsp_fw, FIRMWARE_IMG_TSP, dev);
-	if (ret) {
-		pr_info("faild req fw 0x%x %s, load fw at TA internal\n", ret, FIRMWARE_IMG_TSP);
-		g_tsp_fw = NULL;
-	}
-	pr_info("tz_tsp_request_firmware ret = %d g_tsp_fw = %p\n", ret, (void *)g_tsp_fw);
-	return ret;
-}
-
-int tz_tsp_release_firmware(void)
-{
-	if (g_tsp_fw) {
-		release_firmware(g_tsp_fw);
-		g_tsp_fw = NULL;
-	}
-	return 0;
-}
-
-int tz_tsp_load_firmware(struct device *dev, int figo_id, int fw_idx, bool force_load)
-{
-	void *fw_buffer = NULL;
 	dma_addr_t fw_dma_addr = 0;
 	TEEC_Operation operation;
 	TEEC_Result result = TEEC_SUCCESS;
 
-	if (g_tsp_fw) {
-		fw_buffer = kmalloc(g_tsp_fw->size, GFP_KERNEL);
-		if (!fw_buffer) {
-			pr_err("can't allocate memory for firmware loading\n");
-			return -ENOMEM;
-		}
-
-		memcpy(fw_buffer, g_tsp_fw->data, g_tsp_fw->size);
-		fw_dma_addr = dma_map_single(dev, fw_buffer, g_tsp_fw->size, DMA_TO_DEVICE);
+	if (fw_info.data) {
+		fw_dma_addr = dma_map_single(dev, fw_info.data, fw_info.size, DMA_TO_DEVICE);
 		if (dma_mapping_error(dev, fw_dma_addr)) {
 			pr_err("can't map DMA buffer for firmware loading\n");
-			kfree(fw_buffer);
 			return -ENOMEM;
 		}
 		operation.params[1].value.a = fw_dma_addr;
-		operation.params[1].value.b = g_tsp_fw->size;
+		operation.params[1].value.b = fw_info.size;
 	}
 
 	operation.paramTypes = TEEC_PARAM_TYPES(
 		TEEC_VALUE_INPUT,
-		g_tsp_fw ? TEEC_VALUE_INPUT : TEEC_NONE,
+		fw_info.data ? TEEC_VALUE_INPUT : TEEC_NONE,
 		TEEC_NONE,
 		TEEC_NONE);
 	operation.params[0].value.a = fw_idx;
@@ -153,17 +116,15 @@ int tz_tsp_load_firmware(struct device *dev, int figo_id, int fw_idx, bool force
 			&operation,
 			NULL);
 	if (result != TEEC_SUCCESS) {
-		pr_err("figo[%d] load firmware[tsp fw=%p] error: 0x%x\n", figo_id, g_tsp_fw, result);
+		pr_err("figo[%d] load firmware[tsp fw=%p] error: 0x%x\n", figo_id, fw_info.data, result);
 	}
 
-	if (g_tsp_fw) {
-		dma_unmap_single(dev, fw_dma_addr, g_tsp_fw->size, DMA_TO_DEVICE);
-		kfree(fw_buffer);
+	if (fw_info.data) {
+		dma_unmap_single(dev, fw_dma_addr, fw_info.size, DMA_TO_DEVICE);
 	}
 
 	return tz_tsp_errcode_translate(result);
 }
-EXPORT_SYMBOL(tz_tsp_load_firmware);
 
 int tz_tsp_initialize(struct device *dev)
 {
