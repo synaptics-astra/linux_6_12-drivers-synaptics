@@ -10,7 +10,6 @@
 #include "berlin_pcm.h"
 #include "berlin_util.h"
 #include "aio_hal.h"
-#include "i2s_common.h"
 #include "mic.h"
 #include "avio_common.h"
 
@@ -199,7 +198,7 @@ static int i2s_mic2_hw_params(struct snd_pcm_substream *ss,
 		aio_set_slave_mode(mic2->aio_handle, AIO_ID_MIC2_RX, blk_sel);
 	}
 
-	ret = aio_set_xfeed_mode(mic2->aio_handle, I2S3_ID, xfeed, xfeed);
+	ret = aio_set_xfeed_mode(mic2->aio_handle, AIO_ID_MIC2_RX, xfeed, xfeed);
 	if (ret != 0) {
 		snd_printk("fail to set xfeed mode for i2s, ret %d\n", ret);
 		return ret;

@@ -10,7 +10,6 @@
 #include "berlin_pcm.h"
 #include "berlin_util.h"
 #include "aio_hal.h"
-#include "i2s_common.h"
 #include "mic.h"
 #include "avio_common.h"
 

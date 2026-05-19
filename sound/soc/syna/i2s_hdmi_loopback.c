@@ -10,7 +10,6 @@
 #include "berlin_pcm.h"
 #include "berlin_util.h"
 #include "aio_hal.h"
-#include "i2s_common.h"
 #include "avio_common.h"
 
 #define HDMI_LPBK_RATES   (SNDRV_PCM_RATE_8000_192000)

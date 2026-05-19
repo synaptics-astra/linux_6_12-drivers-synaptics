@@ -330,22 +330,24 @@ static void i2s_set_aio(struct i2s_dai_priv *i2s_dai, int stream,
 
 	if (i2s_dai->xfeed) {
 		int i;
-
-		xfeed = (i2s_dai->is_master) ? 0 : 1; // 0: Master mode, 1: Slave mode
-		if (i2s_dai->xfeed_chid != i2s_ctrl->i2s_id[0])
-			xfeed |= 2; // Cross feed from I2S1
-
-		/* xfeed channel id */
-		aio_set_xfeed_mode(i2s_dai->aio_handle, i2s_dai->xfeed_chid, xfeed, xfeed);
-
 		/* Handle both record and playback clk selection */
 		for (i = start; i < i2s_ctrl->irqc; i++) {
+
+			xfeed = (i2s_dai->is_master) ? 0 : 1; /* 0: Master mode, 1: Slave mode */
+
+			if (((i2s_ctrl->i2s_id[i] == AIO_ID_PRI_TX) &&\
+				(i2s_dai->xfeed_chid == AIO_ID_MIC1_RX)) ||\
+				((i2s_ctrl->i2s_id[i] == AIO_ID_MIC1_RX) &&\
+				(i2s_dai->xfeed_chid == AIO_ID_PRI_TX)))
+					xfeed |= 2; /* 2: Xfeed Master, 3: Xfeed Slave */
+
+			aio_set_xfeed_mode(i2s_dai->aio_handle, i2s_ctrl->i2s_id[i], xfeed, xfeed);
 			aio_set_bclk_sel(i2s_dai->aio_handle, i2s_ctrl->i2s_id[i],
-				i2s_dai->xfeed_chid == i2s_ctrl->i2s_id[i] ? 1 : 2);
+				i2s_dai->xfeed_chid == i2s_ctrl->i2s_id[i] ? 1 : 0);
 			aio_set_bclk_inv(i2s_dai->aio_handle, i2s_ctrl->i2s_id[i],
 				i2s_dai->ctrl.invbclk);
 			aio_set_fsync(i2s_dai->aio_handle, i2s_ctrl->i2s_id[i],
-				i2s_dai->xfeed_chid == i2s_ctrl->i2s_id[i] ? 1 : 2,
+				i2s_dai->xfeed_chid == i2s_ctrl->i2s_id[i] ? 1 : 0,
 				i2s_dai->ctrl.invfs);
 		}
 	} else {

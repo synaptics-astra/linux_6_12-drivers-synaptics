@@ -6,14 +6,6 @@
 #include "aio.h"
 #include "aio_priv.h"
 
-enum aio_i2s_id {
-	I2S1_ID = 0,
-	I2S2_ID = 1,
-	I2S3_ID = 2,
-	I2S4_ID = 3,
-	I2S5_ID = 4,
-};
-
 #define I2S_PRI_OFFSET (RA_AIO_PRI + RA_PRI_TSD0_PRI)
 #define I2S_SEC_OFFSET (RA_AIO_SEC + RA_SEC_TSD0_SEC)
 #define I2S_SPDIF_OFFSET (RA_AIO_SPDIF + RA_SPDIF_SPDIF)

@@ -362,6 +362,7 @@ int aio_set_xfeed_mode(void *hd, s32 i2sid, u32 lrclk, u32 bclk)
 		reg.uXFEED_I2S2_BCLKIO_MODE = bclk;
 		break;
 	case AIO_ID_SEC_TX:
+	case AIO_ID_MIC2_RX:
 		reg.uXFEED_I2S3_LRCKIO_MODE = lrclk;
 		reg.uXFEED_I2S3_BCLKIO_MODE = bclk;
 		break;
