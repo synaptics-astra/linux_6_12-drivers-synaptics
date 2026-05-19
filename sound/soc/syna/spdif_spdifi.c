@@ -84,7 +84,7 @@ static int spdifi_hw_params(struct snd_pcm_substream *ss,
 
 	ret = aio_spdifi_config(spdifi->aio_handle, fs, width);
 
-	if (ret < 0) {
+	if (ret < 0 && ret != -ETIMEDOUT) {
 		snd_printk("failed to config SPDIF DAI: %d\n", ret);
 		aio_spdifi_config_reset(spdifi->aio_handle);
 		return -EINVAL;

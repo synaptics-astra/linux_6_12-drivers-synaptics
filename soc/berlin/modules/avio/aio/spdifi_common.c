@@ -271,7 +271,7 @@ int aio_spdifi_config(void *hd, u32 fs, u32 width)
 			i + 1, addr, aio_read(aio, addr));
 	}
 	/* follow diag code, wait clock lock */
-	ret = aio_spdifi_wait_lock(aio, 2000);
+	ret = aio_spdifi_wait_lock(aio, 100);
 	return ret;
 }
 EXPORT_SYMBOL(aio_spdifi_config);
