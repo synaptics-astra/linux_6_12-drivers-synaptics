@@ -258,7 +258,7 @@ static int i2s_soc_dai_set_aio(struct i2s_soc_dai *soc_dai, u32 id, u32 fs, int 
 	soc_dai->ctrl.sample_resolution	= dfm;
 	soc_dai->ctrl.sample_period_in_bclk	= cfm;
 	soc_dai->ctrl.msb	= true;
-	if (aio_i2s_get_mclk_cfg(soc_dai->ctrl.fs, soc_dai->sample_period, &mclk) && !mclk) {
+	if (aio_i2s_get_mclk_cfg(soc_dai->ctrl.fs, soc_dai->sample_period, &mclk) || !mclk) {
 		snd_printk("fail to use mclk config");
 		return -EINVAL;
 	}
@@ -596,7 +596,7 @@ static int i2s_soc_dai_hw_free(struct snd_pcm_substream *substream,
 	aio_set_aud_ch_mute(soc_dai->aio_handle, i2s_ctrl->i2s_chid, 0, true);
 	aio_set_aud_ch_flush(soc_dai->aio_handle, i2s_ctrl->i2s_chid, 0, true);
 	snd_printd("%s chid %d hw free\n", __func__, i2s_ctrl->i2s_chid);
-	if (i2s_ctrl->irq_requested && i2s_ctrl->i2s_irq >= 0) {
+	if (i2s_ctrl->irq_requested) {
 		berlin_pcm_free_dma_irq(substream, 1, &i2s_ctrl->i2s_irq);
 		i2s_ctrl->irq_requested = false;
 	}
@@ -897,6 +897,7 @@ static int syna_i2s_soc_dai_probe(struct platform_device *pdev)
 	struct device_node *np = dev->of_node;
 	struct i2s_soc_dai *soc_dai;
 	struct i2s_io_params *i2s_tx, *i2s_rx;
+	struct irq_data *irqd;
 	const char *prop_val;
 	int irq, ret;
 	bool isLpbk = false;
@@ -932,7 +933,12 @@ static int syna_i2s_soc_dai_probe(struct platform_device *pdev)
 
 	soc_dai->mode |= I2SO_MODE;
 	i2s_tx->i2s_irq = irq;
-	i2s_tx->i2s_chid = irqd_to_hwirq(irq_get_irq_data(irq));
+	irqd = irq_get_irq_data(irq);
+	if (!irqd) {
+		ret = -EINVAL;
+		goto err;
+	}
+	i2s_tx->i2s_chid = irqd_to_hwirq(irqd);
 	soc_dai->nodeClkId = map_aio_clkId(i2s_tx->i2s_chid);
 	soc_dai->xFeedClkCfg = aio_get_bclk_xfeed_mode(soc_dai->aio_handle, i2s_tx->i2s_chid);
 	snd_printd("tx irq %d irq_child %d for node %s\n", irq, i2s_tx->i2s_chid, pdev->name);
@@ -945,7 +951,12 @@ static int syna_i2s_soc_dai_probe(struct platform_device *pdev)
 
 	soc_dai->mode |= I2SI_MODE;
 	i2s_rx->i2s_irq = irq;
-	i2s_rx->i2s_chid = irqd_to_hwirq(irq_get_irq_data(irq));
+	irqd = irq_get_irq_data(irq);
+	if (!irqd) {
+		ret = -EINVAL;
+		goto err;
+	}
+	i2s_rx->i2s_chid = irqd_to_hwirq(irqd);
 	soc_dai->nodeClkId = map_aio_clkId(i2s_rx->i2s_chid);
 	soc_dai->xFeedClkCfg = aio_get_bclk_xfeed_mode(soc_dai->aio_handle, i2s_rx->i2s_chid);
 	snd_printd("rx irq %d irq_child %d for node %s\n", irq, i2s_rx->i2s_chid, pdev->name);

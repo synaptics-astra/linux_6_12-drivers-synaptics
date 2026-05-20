@@ -107,7 +107,7 @@ static int aud_clk_config(struct snd_pcm_substream *s)
 
 	switch (clkroot->clkCfg.bclk_src_sel) {
 	case AIO_BCLK_SRC_APLL:
-		if (aio_i2s_get_mclk_cfg(soc_dai->ctrl.fs, soc_dai->sample_period, &mclk) && !mclk) {
+		if (aio_i2s_get_mclk_cfg(soc_dai->ctrl.fs, soc_dai->sample_period, &mclk) || !mclk) {
 			pr_err("failed to find mclk cfg");
 			ret = -EINVAL;
 			goto exit;
@@ -337,11 +337,11 @@ struct aud_clk *aud_get_clk(enum aud_clk_id clkId)
 		return NULL;
 
 	pCLK = gaudClk.clks[clkId-1];
-	soc_dai = (struct i2s_soc_dai *)pCLK->clk_soc_dai;
 	if (!pCLK) {
 		snd_printk("%s error: CLK not configured as master...\n", __func__);
-		pCLK = NULL;
+		return NULL;
 	}
+	soc_dai = (struct i2s_soc_dai *)pCLK->clk_soc_dai;
 
 	snd_printd("%s clkId %d as root, isMaster %d bclk_src %d\n",
 		__func__, clkId, soc_dai->is_master, soc_dai->clkSrcSel);
