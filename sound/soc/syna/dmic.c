@@ -570,7 +570,9 @@ static int dmic_pdm_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct device_node *np = dev->of_node;
 	struct dmic_data *dmic;
+	struct irq_data *irqd;
 	int ret;
+	int irq;
 	u32 i = 0;
 	int channel_setup;
 	u32 dmic_ctrl_reg[2];
@@ -590,14 +592,19 @@ static int dmic_pdm_probe(struct platform_device *pdev)
 		return 0;
 	}
 	for (i = 0; i < dmic->irqc; i++) {
-		dmic->irq[i] = platform_get_irq(pdev, i);
-		if (dmic->irq[i] < 0)
-			return dmic->irq[i];
-		dmic->chid[i] = irqd_to_hwirq(irq_get_irq_data(dmic->irq[i]));
-		if (dmic->chid[i] < 0) {
-			snd_printk("%s: got invalid dhub chid %d\n", __func__, dmic->chid[i]);
+		irq = platform_get_irq(pdev, i);
+		if (irq < 0)
+			return irq;
+
+		dmic->irq[i] = irq;
+		irqd = irq_get_irq_data(irq);
+		if (!irqd) {
+			snd_printk("%s: failed to get irq data for irq %d\n",
+					  __func__, irq);
 			return -EINVAL;
 		}
+
+		dmic->chid[i] = irqd_to_hwirq(irqd);
 	}
 
 	dmic->dev_name = dev_name(dev);
