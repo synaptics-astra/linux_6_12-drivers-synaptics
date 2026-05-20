@@ -320,7 +320,7 @@ u32 aio_get_reg_base_addr(u32 id)
 	RA_AIO_SEC1, RA_AIO_MIC21, RA_AIO_SEC2, RA_AIO_MIC22, RA_AIO_SEC3, RA_AIO_MIC23};
 	u32 address = INVALID_ADDRESS;
 
-	if (id > ARRAY_SIZE(chIdxI2SRegBase)) {
+	if (id >= ARRAY_SIZE(chIdxI2SRegBase)) {
 		pr_warn("%s: id(%d) not supported\n", __func__, id);
 		return address;
 	}
@@ -626,8 +626,8 @@ static int aio_i2s_mic2_lpbk(struct aio_priv *aio, u32 idx,
 	T32PRIAUD_CTRL reg_mic4ctrl;
 	T32PRIAUD_CTRL reg_prictrl;
 	T32PRIAUD_CLKDIV reg_tx_clkDiv;
-	u32 i2sx_rx_address;
-	u32 i2sx_tx_address;
+	u32 i2sx_rx_address = 0;
+	u32 i2sx_tx_address = 0;
 
 	switch (idx) {
 	case AIO_ID_I2S1_RX:
