@@ -735,6 +735,8 @@ int berlin_playback_hw_params(struct snd_pcm_substream *ss,
 	struct snd_soc_pcm_runtime *rtd = ss->private_data;
 	struct snd_soc_component *component =
 		snd_soc_rtdcom_lookup(rtd, "syna-berlin-pcm");
+	if (!component)
+		return -EINVAL;
 	struct device *dev = component->dev;
 	struct berlin_chip *chip = dev_get_drvdata(dev);
 	struct platform_device *pdev = chip->pdev;
@@ -1203,10 +1205,15 @@ static int berlin_playback_copy(struct snd_pcm_substream *ss,
 		/* consider padding for unused tdm slots */
 		per_tdm_off = pos * bp->tdm_slots / bp->channels
 				* bp->pcm_ratio / bp->pcm_ratio_div;
+		if (!bp->pcm_dma_area[0])
+			return -EINVAL;
 
 		ch_buf1 = (int32_t *)(bp->pcm_dma_area[0] + per_tdm_off);
-		if (bp->chid_num > 1)
+		if (bp->chid_num > 1) {
+			if (!bp->pcm_dma_area[1])
+				return -EINVAL;
 			ch_buf2 = (int32_t *)(bp->pcm_dma_area[1] + per_tdm_off);
+		}
 		pcm_buf = ch_buf1;
 	} else if (bp->output_mode & SPDIFO_MODE) {
 		pcm_buf = (int32_t *)(bp->spdif_dma_area +
