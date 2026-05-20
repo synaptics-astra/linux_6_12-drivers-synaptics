@@ -692,6 +692,10 @@ int syna_lcdc_update_gamma_table(int lcdcID, const void *data,
 
 	gamma16 = (uint16_t *)data;
 
+	if (!gamma16) {
+		return -EINVAL;
+	}
+
 	/*
 	 * Convert DRM gamma LUT (256 entries, 16-bit) to LCDC format (33 entries, 8-bit).
 	 * DRM provides drm_color_lut with 4 u16s per entry (r, g, b, reserved).
@@ -747,7 +751,6 @@ int syna_lcdc_update_brightness(int lcdcID, int channel, uint64_t val)
 	/* Convert from signed range [-128,127] to unsigned [0,255] */
 	reg_val = signed_val + 128;
 
-	dev->brightness[channel] = val;
 	if (channel == SYNA_LCDC_BRIGHT_CH_ALL) {
 		for (i = 0; i < SYNA_LCDC_BRIGHTNESS_LUT_ENTRIES; i++) {
 			syna_lcdc_set_brightness(dev, i, reg_val);
@@ -755,6 +758,7 @@ int syna_lcdc_update_brightness(int lcdcID, int channel, uint64_t val)
 		}
 	} else if (channel >= SYNA_LCDC_BRIGHT_CH_R && channel <= SYNA_LCDC_BRIGHT_CH_B) {
 		syna_lcdc_set_brightness(dev, channel, reg_val);
+		dev->brightness[channel] = val;
 	} else {
 		return -EINVAL;
 	}
