@@ -63,13 +63,13 @@ enum burst_data_type {
  * 32-bits packed spdif data
  */
 struct spdif_frame {
-	int16_t sync : 4;
-	int16_t validflag : 1;
-	int16_t user : 1;
-	int16_t channelstatus : 1;
-	int16_t paritybit : 1;
-	int16_t audiosample1 : 8;
-	int16_t audiosample2;
+	u16 sync : 4;
+	u16 validflag : 1;
+	u16 user : 1;
+	u16 channelstatus : 1;
+	u16 paritybit : 1;
+	u16 audiosample1 : 8;
+	u16 audiosample2;
 };
 
 struct hdmi_spdif_frame {
