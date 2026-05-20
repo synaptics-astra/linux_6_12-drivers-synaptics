@@ -626,6 +626,9 @@ static struct dma_async_tx_descriptor *d250_prep_memcpy(struct dma_chan *chan,
 	size_t xfer_len, step_max;
 	dma_addr_t phys;
 
+	if (unlikely(!len))
+		return NULL;
+
 	tsz = __ffs(len | dest | src | (1 << dch->tsz));
 	step_max = ((1UL << 16) - 1) << tsz;
 	sglen = DIV_ROUND_UP(len, step_max);
@@ -971,7 +974,7 @@ static int d350_resume(struct dma_chan *chan)
 static u32 d350_get_residue(struct d350_chan *dch)
 {
 	u32 res, xsize, xsizehi, linkaddr, linkaddrhi, hi_new;
-	int i, sgcur, retries = 3; /* 1st time unlucky, 2nd improbable, 3rd just broken */
+	int i, sgcur = 0, retries = 3; /* 1st time unlucky, 2nd improbable, 3rd just broken */
 	struct d350_desc *desc = dch->desc;
 	struct d350 *dmac = to_d350(dch->vc.chan.device);
 
