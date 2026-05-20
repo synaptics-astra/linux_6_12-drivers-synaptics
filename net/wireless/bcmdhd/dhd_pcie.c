@@ -15233,7 +15233,7 @@ dhd_get_rpm_state(dhd_pub_t *dhd)
 void
 dhd_set_rpm_state(dhd_pub_t *dhd, bool state)
 {
-	DHD_ERROR(("%s: %d\n", __FUNCTION__, state));
+	DHD_INFO(("%s: %d\n", __FUNCTION__, state));
 	dhd->bus->rpm_enabled = state;
 }
 

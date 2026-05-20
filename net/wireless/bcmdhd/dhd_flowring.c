@@ -1218,7 +1218,7 @@ dhd_update_multicilent_flow_rings(dhd_pub_t *dhdp, uint8 ifindex, bool increment
 	uint32 id;
 	flow_ring_table_t *flow_ring_table;
 
-	DHD_ERROR(("%s: ifindex %u\n", __FUNCTION__, ifindex));
+	DHD_INFO(("%s: ifindex %u\n", __FUNCTION__, ifindex));
 
 	ASSERT(ifindex < DHD_MAX_IFS);
 	if (ifindex >= DHD_MAX_IFS)
@@ -1345,7 +1345,7 @@ dhd_update_interface_flow_info(dhd_pub_t *dhdp, uint8 ifindex,
 	if_flow_lkup = (if_flow_lkup_t *)dhdp->if_flow_lkup;
 
 	if (op == WLC_E_IF_ADD || op == WLC_E_IF_CHANGE) {
-		DHD_ERROR(("%s: ifindex:%d previous role:%d new role:%d\n",
+		DHD_INFO(("%s: ifindex:%d previous role:%d new role:%d\n",
 			__FUNCTION__, ifindex, if_flow_lkup[ifindex].role, role));
 		if_flow_lkup[ifindex].role = role;
 #ifdef PCIE_FULL_DONGLE

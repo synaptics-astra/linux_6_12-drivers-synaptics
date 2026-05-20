@@ -1109,18 +1109,18 @@ static int dhd_pm_callback(struct notifier_block *nfb, unsigned long action, voi
 	switch (action) {
 	case PM_HIBERNATION_PREPARE:
 	case PM_SUSPEND_PREPARE:
-#ifdef DHD_WOWL_IN_SUSPEND_SDIO
+#ifndef DHD_ANDROID_IMG_BUILD
 	dhd_set_wowl_active(TRUE);
 	msleep(1000);
-#endif /* DHD_WOWL_IN_SUSPEND_SDIO */
+#endif /* DHD_ANDROID_IMG_BUILD */
 		suspend = TRUE;
 		break;
 
 	case PM_POST_HIBERNATION:
 	case PM_POST_SUSPEND:
-#ifdef DHD_WOWL_IN_SUSPEND_SDIO
+#ifndef DHD_ANDROID_IMG_BUILD
 	dhd_set_wowl_active(FALSE);
-#endif /* DHD_WOWL_IN_SUSPEND_SDIO */
+#endif /* DHD_ANDROID_IMG_BUILD */
 		suspend = FALSE;
 		break;
 	}
