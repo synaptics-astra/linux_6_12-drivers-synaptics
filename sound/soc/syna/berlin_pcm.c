@@ -138,11 +138,16 @@ static const struct attribute_group berlin_sysfs_group = {
 static irqreturn_t berlin_alsa_io_isr(int irq, void *dev_id)
 {
 	struct snd_pcm_substream *substream;
+	struct irq_data *irqd;
 	irq_hw_number_t hw_irq;
 	int chan_id;
 
 	substream = dev_id;
-	hw_irq = irqd_to_hwirq(irq_get_irq_data(irq));
+	irqd = irq_get_irq_data(irq);
+	if (!irqd)
+		return IRQ_NONE;
+
+	hw_irq = irqd_to_hwirq(irqd);
 	chan_id = (int)hw_irq;
 
 	if (substream->runtime) {
@@ -186,7 +191,13 @@ int berlin_pcm_request_dma_irq(struct snd_pcm_substream *substream,
 	}
 
 	for (i = 0; i < chid_num; i++)
-		ch[i] = irqd_to_hwirq(irq_get_irq_data(params->irq[i]));
+	{
+		struct irq_data *irqd = irq_get_irq_data(params->irq[i]);
+
+		if (!irqd)
+			return -EINVAL;
+		ch[i] = irqd_to_hwirq(irqd);
+	}
 
 	if (substream->stream == SNDRV_PCM_STREAM_CAPTURE)
 		berlin_capture_set_ch_mode(substream, chid_num, ch,
@@ -300,6 +311,8 @@ static int berlin_pcm_open(struct snd_soc_component *component,
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_component *c = snd_soc_rtdcom_lookup(rtd, "syna-berlin-pcm");
+	if (!c)
+		return -EINVAL;
 	struct device *dev = c->dev;
 	struct berlin_chip *chip = dev_get_drvdata(dev);
 

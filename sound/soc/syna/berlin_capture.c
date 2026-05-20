@@ -1396,6 +1396,8 @@ int berlin_capture_hw_params(struct snd_pcm_substream *ss,
 	//struct device *dev = rtd->platform->dev;
 	struct snd_soc_component *component =
 			snd_soc_rtdcom_lookup(rtd, "syna-berlin-pcm");
+	if (!component)
+		return -EINVAL;
 	struct device *dev = component->dev;
 	struct berlin_chip *chip = dev_get_drvdata(dev);
 	struct platform_device *platform_dev = chip->pdev;
