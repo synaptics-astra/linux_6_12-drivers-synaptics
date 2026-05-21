@@ -1330,12 +1330,12 @@ static int berlin_playback_copy(struct snd_pcm_substream *ss,
 							s16_pcm_source[i * channels + j] << 16;
 				}
 				/* Zero out the unused TDM slots */
-				if (bp->chid_num > 1 && channels < 16) {
+				if (ch_buf1 && bp->chid_num > 1 && channels < 16) {
 					for (j = channels - 8; j < 8; j++)
 						ch_buf1[i * 8 + j] = 0;
 				}
 				/* Zero out the unused TDM slots */
-				if (bp->chid_num == 1 && channels < bp->tdm_slots) {
+				if (ch_buf1 && bp->chid_num == 1 && channels < bp->tdm_slots) {
 					for (j = channels; j < bp->tdm_slots; j++)
 						ch_buf1[i * bp->tdm_slots + j] = 0;
 				}
@@ -1401,12 +1401,12 @@ static int berlin_playback_copy(struct snd_pcm_substream *ss,
 					}
 				}
 				/* Zero out the unused TDM slots */
-				if (bp->chid_num > 1 && channels < 16) {
+				if (ch_buf1 && bp->chid_num > 1 && channels < 16) {
 					for (j = channels - 8; j < 8; j++)
 						ch_buf1[i * 8 + j] = 0;
 				}
 				/* Zero out the unused TDM slots */
-				if (bp->chid_num == 1 && channels < bp->tdm_slots) {
+				if (ch_buf1 && bp->chid_num == 1 && channels < bp->tdm_slots) {
 					for (j = channels; j < bp->tdm_slots; j++)
 						ch_buf1[i * bp->tdm_slots + j] = 0;
 				}
@@ -1437,12 +1437,12 @@ static int berlin_playback_copy(struct snd_pcm_substream *ss,
 				}
 			}
 			/* Zero out the unused TDM slots */
-			if (bp->chid_num > 1 && channels < 16) {
+			if (ch_buf1 && bp->chid_num > 1 && channels < 16) {
 				for (j = channels - 8; j < 8; j++)
 					ch_buf1[i * 8 + j] = 0;
 			}
 			/* Zero out the unused TDM slots */
-			if (bp->chid_num == 1 && channels < bp->tdm_slots) {
+			if (ch_buf1 && bp->chid_num == 1 && channels < bp->tdm_slots) {
 				for (j = channels; j < bp->tdm_slots; j++)
 					ch_buf1[i * bp->tdm_slots + j] = 0;
 			}
@@ -1506,12 +1506,12 @@ static int berlin_playback_copy(struct snd_pcm_substream *ss,
 					}
 				}
 				/* Zero out the unused TDM slots */
-				if (bp->chid_num > 1 && channels < 16) {
+				if (ch_buf1 && bp->chid_num > 1 && channels < 16) {
 					for (j = channels - 8; j < 8; j++)
 						ch_buf1[i * 8 + j] = 0;
 				}
 				/* Zero out the unused TDM slots */
-				if (bp->chid_num == 1 && channels < bp->tdm_slots) {
+				if (ch_buf1 && bp->chid_num == 1 && channels < bp->tdm_slots) {
 					for (j = channels; j < bp->tdm_slots; j++)
 						ch_buf1[i * bp->tdm_slots + j] = 0;
 				}
