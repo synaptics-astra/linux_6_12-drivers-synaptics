@@ -223,6 +223,7 @@ static void start_dma_if_needed(struct berlin_playback *bp)
 {
 	dma_addr_t dma_source_address;
 	int dma_size, i;
+	u32 chid_num;
 
 	if ((bp->output_mode & HDMIO_MODE) && !bp->hdmi_dma_addr) {
 		snd_printk("%s: hdmi mem invalid\n", __func__);
@@ -230,6 +231,7 @@ static void start_dma_if_needed(struct berlin_playback *bp)
 	}
 
 	assert_spin_locked(&bp->lock);
+	chid_num = min_t(u32, bp->chid_num, MAX_CHID);
 
 dma_begin:
 	if (bp->pcm_indirect.hw_ready < (bp->period_size + bp->in_dma_size) ||
@@ -242,7 +244,7 @@ dma_begin:
 		return;
 	}
 
-	for (i = 0; i < bp->chid_num; ++i)
+	for (i = 0; i < chid_num; ++i)
 		if (bp->ma_dma_pending[i])
 			return;
 
@@ -250,7 +252,7 @@ dma_begin:
 		return;
 
 	if (bp->output_mode & I2SO_MODE) {
-		for (i = 0; i < bp->chid_num; ++i) {
+		for (i = 0; i < chid_num; ++i) {
 			if (bp->ma_dma_pending[i])
 				continue;
 			dma_source_address = bp->pcm_dma_addr[i] +
@@ -266,7 +268,7 @@ dma_begin:
 						0, 0, 0, 1, 0, 0);
 			bp->pauseSampleCounter += bp->period_size / (bp->channel_num *
 					snd_pcm_format_physical_width(bp->sample_format) / 8)
-					/ bp->chid_num;
+					/ max_t(u32, chid_num, 1);
 		}
 	}
 	if ((bp->output_mode & SPDIFO_MODE)
@@ -1669,12 +1671,13 @@ int berlin_playback_isr(struct snd_pcm_substream *ss,
 	struct snd_pcm_runtime *runtime = ss->runtime;
 	struct berlin_playback *bp = runtime->private_data;
 	unsigned int i;
+	u32 chid_num = min_t(u32, bp->chid_num, MAX_CHID);
 	bool all_update = false, pending = false;
 
 	spin_lock(&bp->lock);
 
 	/* If we were not pending, avoid pointer manipulation */
-	for (i = 0; i < bp->chid_num; ++i) {
+	for (i = 0; i < chid_num; ++i) {
 		if (chanId == bp->i2s_ch[i]) {
 #ifdef BUF_STATE_DEBUG
 			if (bp->ma_dma_pending[i]) {
@@ -1724,7 +1727,7 @@ int berlin_playback_isr(struct snd_pcm_substream *ss,
 		snd_pcm_period_elapsed(ss);
 
 	spin_lock(&bp->lock);
-	for (i = 0; i < bp->chid_num; ++i) {
+	for (i = 0; i < chid_num; ++i) {
 		if (bp->ma_dma_pending[i])
 			pending = true;
 	}
