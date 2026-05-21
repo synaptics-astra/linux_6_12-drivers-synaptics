@@ -1326,6 +1326,8 @@ static int berlin_playback_copy(struct snd_pcm_substream *ss,
 				for (j = 0; j < channels; j++) {
 					if (bp->chid_num > 1)
 						pcm_buf = (j >= 8) ? ch_buf1 : ch_buf2;
+					if (unlikely(!pcm_buf))
+						return -EINVAL;
 					pcm_buf[i * bp->tdm_slots + (j % bp->tdm_slots)] =
 							s16_pcm_source[i * channels + j] << 16;
 				}
@@ -1395,8 +1397,12 @@ static int berlin_playback_copy(struct snd_pcm_substream *ss,
 					if (bp->output_mode & I2SO_MODE) {
 						if (bp->chid_num > 1)
 							pcm_buf = (j >= 8) ? ch_buf1 : ch_buf2;
+						if (unlikely(!pcm_buf))
+							return -EINVAL;
 						pcm_buf[i * bp->tdm_slots + (j % bp->tdm_slots)] = s32_pcm_source[i * channels + j];
 					} else {
+						if (unlikely(!pcm_buf))
+							return -EINVAL;
 						pcm_buf[i * channels + j] = s32_pcm_source[i * channels + j];
 					}
 				}
@@ -1423,12 +1429,16 @@ static int berlin_playback_copy(struct snd_pcm_substream *ss,
 				if (bp->output_mode & I2SO_MODE) {
 					if (bp->chid_num > 1)
 						pcm_buf = (j >= 8) ? ch_buf1 : ch_buf2;
+					if (unlikely(!pcm_buf))
+						return -EINVAL;
 					ch_offset = (i * channels + j) * ch_bytes;
 					pcm_buf[i * bp->tdm_slots + (j % bp->tdm_slots)] =
 						(pcm_source[ch_offset] << 8) |
 						(pcm_source[ch_offset + 1] << 16) |
 						(pcm_source[ch_offset + 2] << 24);
 				} else {
+					if (unlikely(!pcm_buf))
+						return -EINVAL;
 					ch_offset = (i * channels + j) * ch_bytes;
 					pcm_buf[i * channels + j] =
 						(pcm_source[ch_offset] << 8) |
@@ -1498,9 +1508,13 @@ static int berlin_playback_copy(struct snd_pcm_substream *ss,
 					if (bp->output_mode & I2SO_MODE) {
 						if (bp->chid_num > 1)
 							pcm_buf = (j >= 8) ? ch_buf1 : ch_buf2;
+						if (unlikely(!pcm_buf))
+							return -EINVAL;
 						pcm_buf[i * bp->tdm_slots + (j % bp->tdm_slots)] =
 							s32_pcm_source[i * channels + j] << 8;
 					} else {
+						if (unlikely(!pcm_buf))
+							return -EINVAL;
 						pcm_buf[i * channels + j] =
 							s32_pcm_source[i * channels + j] << 8;
 					}
