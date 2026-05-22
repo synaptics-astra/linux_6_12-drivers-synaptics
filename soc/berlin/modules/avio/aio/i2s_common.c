@@ -7,7 +7,7 @@
 #include "avioDhub.h"
 #include "avio_sub_module.h"
 
-bool aio_ch_en[AIO_ID_MAX_NUM];
+static atomic_t aio_ch_en[AIO_ID_MAX_NUM];
 
 enum aio_ch_operation {
 	AIO_CH_EN,
@@ -88,15 +88,15 @@ EXPORT_SYMBOL(aio_set_aud_ch_en);
 
 void aio_set_i2s_ch_en(u32 id, bool enable)
 {
-	pr_debug("%s , set ch id %d\n", __func__, id);
-	aio_ch_en[id] = enable;
+	/* Atomically set channel enable state */
+	atomic_set(&aio_ch_en[id], enable ? 1 : 0);
 }
 EXPORT_SYMBOL(aio_set_i2s_ch_en);
 
 bool aio_get_i2s_ch_en(u32 id)
 {
-	pr_debug("%s , get ch id %d\n", __func__, id);
-	return aio_ch_en[id];
+	/* Atomically get channel enable state and return bool*/
+	return atomic_read(&aio_ch_en[id]) != 0;
 }
 EXPORT_SYMBOL(aio_get_i2s_ch_en);
 
