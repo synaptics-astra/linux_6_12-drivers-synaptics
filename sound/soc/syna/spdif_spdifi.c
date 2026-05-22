@@ -275,6 +275,16 @@ static int spdifi_probe(struct platform_device *pdev)
 	/* MUST after aio handle got*/
 	spdifi_get_sample_rate_margin(dev, spdifi);
 
+	/*
+	 * Initialize SPDIF RX so BDET can auto-detect incoming ARC
+	 * signal before userspace opens the capture device.
+	 */
+	aio_spdifi_sw_reset(spdifi->aio_handle);
+	if (!spdifi->dynamic_src_ctrl)
+		aio_spdifi_src_sel(spdifi->aio_handle,
+			spdifi->arc_clk ? 1 : 0,
+			spdifi->arc_data ? 1 : 0);
+
 	ret = devm_snd_soc_register_component(dev,
 					      &spdifi_component,
 					      &spdifi_dai, 1);
