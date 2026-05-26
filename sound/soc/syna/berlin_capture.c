@@ -1146,14 +1146,21 @@ static void dmic_copy(struct snd_pcm_substream *ss)
 				(bc->dma_area[0] + bc->read_offset + offset);
 			if (bc->channel_map & (1 << j)) {
 				if (bc->sample_format == SNDRV_PCM_FORMAT_S24_3LE) {
-					char *pcm_dst = (char *)dst;
+					u8 *pcm_dst = (u8 *)dst;
 					s32 tempdst = 0;
 
 					memcpy((void *)&tempdst, (void *)src, 4);
-					*pcm_dst++ = (char)(tempdst >> 8);
-					*pcm_dst++ = (char)(tempdst >> 16);
-					*pcm_dst++ = (char)(tempdst >> 24);
+					*pcm_dst++ = (u8)(tempdst >> 8);
+					*pcm_dst++ = (u8)(tempdst >> 16);
+					*pcm_dst++ = (u8)(tempdst >> 24);
 					dst = (s64 *)((u8 *)dst + 3);
+				} else if (bc->sample_format == SNDRV_PCM_FORMAT_S24_LE) {
+					s32 *pcm_dst = (s32 *)dst;
+					s32 tempdst = 0;
+
+					memcpy((void *)&tempdst, (void *)src, 4);
+					*pcm_dst++ = tempdst >> 8;
+					dst = (s64 *)((u8 *)dst + 4);
 				} else {
 					memcpy((void *)dst, (void *)src, 4);
 					dst = (s64 *)((u8 *)dst + 4);

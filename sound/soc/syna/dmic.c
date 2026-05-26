@@ -300,7 +300,7 @@ static int dmic_pdm_hw_params(struct snd_pcm_substream *ss,
 
 	/* dmic clock source initilization */
 	aio_i2s_set_clock(dmic->aio_handle, AIO_ID_PDM_RX, dmic_clk_table[config_index].clk_sel,
-				  AIO_CLK_D3_SWITCH_NOR, AIO_CLK_SEL_D8, AIO_APLL_0, 1);
+				  AIO_CLK_D3_SWITCH_NOR, AIO_CLK_SEL_D8, apllclk, 1);
 
 	dmic_set_interface_clk(dmic->aio_handle, apllclk, dmic_clk_table[config_index].div_m,
 					dmic_clk_table[config_index].div_n, dmic_clk_table[config_index].div_p);
