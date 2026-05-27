@@ -606,10 +606,6 @@ static int m2m_drv_open(struct inode *inode, struct file *file)
 		return PTR_ERR(sess);
 	pr_debug("m2m sess %d opened\n", sess->sess_id);
 	file->private_data = sess;
-	if (file->f_flags & O_NONBLOCK)
-		sess->fmode = M2M_FEED_MODE_ASYNC;
-	else
-		sess->fmode = M2M_FEED_MODE_SYNC;
 
 	mutex_lock(&m2m_device.sess_mutex);
 
@@ -684,6 +680,7 @@ static long m2m_drv_ioctl(struct file *filp, unsigned int cmd, unsigned long arg
 	case M2M_IOC_UPDATE:
 		if (copy_from_user(&data, (void __user *)arg, _IOC_SIZE(cmd)))
 			return -EFAULT;
+		sess->fmode = (data.mem.is_async == 1 ? M2M_FEED_MODE_ASYNC : M2M_FEED_MODE_SYNC);
 		ret = m2m_update(sess, &data.mem);
 		break;
 	case M2M_IOC_QUERY:

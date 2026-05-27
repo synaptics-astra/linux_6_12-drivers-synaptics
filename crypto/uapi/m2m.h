@@ -83,6 +83,7 @@ struct m2m_buf {
 struct m2m_mem {
 	struct m2m_buf inbuf;
 	struct m2m_buf outbuf;
+	__u8 is_async;
 };
 
 #define M2M_IOC_SET_MODE		_IOW('m', 1, enum m2m_crypto_mode)
