@@ -100,14 +100,7 @@ enum clk_setting {
 };
 
 enum {
-/* For now TZK/OPTEE TA code is not aligned, after TA code is aligned,
- * we can remove the ifdef and just define the command enum once
- */
-#if IS_ENABLED(CONFIG_OPTEE)
 	TSP_FW_LOAD = 9,
-#else
-	TSP_FW_LOAD = 14,
-#endif
 	TSP_SAVE_HW_CONTEXT = 0x10000,
 	TSP_RESTORE_HW_CONTEXT,
 	TSP_SET_FIGO_STATE,
