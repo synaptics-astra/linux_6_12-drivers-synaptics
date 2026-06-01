@@ -1047,25 +1047,25 @@ int aio_set_bclk_inv(void *hd, u32 id, u32 inv)
 	case AIO_ID_PRI_TX:
 		address = RA_AIO_IOSEL + RA_IOSEL_PRIBCLK;
 		reg_pri.u32 = aio_read(aio, address);
-		reg_pri.uPRIBCLK_SEL = inv;
+		reg_pri.uPRIBCLK_INV = inv;
 		aio_write(aio, address, reg_pri.u32);
 		break;
 	case AIO_ID_SEC_TX:
 		address = RA_AIO_IOSEL + RA_IOSEL_SECBCLK;
 		reg_sec.u32 = aio_read(aio, address);
-		reg_sec.uSECBCLK_SEL = inv;
+		reg_sec.uSECBCLK_INV = inv;
 		aio_write(aio, address, reg_sec.u32);
 		break;
 	case AIO_ID_MIC1_RX:
 		address = RA_AIO_IOSEL + RA_IOSEL_MIC1BCLK;
 		reg_mic1.u32 = aio_read(aio, address);
-		reg_mic1.uMIC1BCLK_SEL = inv;
+		reg_mic1.uMIC1BCLK_INV = inv;
 		aio_write(aio, address, reg_mic1.u32);
 		break;
 	case AIO_ID_MIC2_RX:
 		address = RA_AIO_IOSEL + RA_IOSEL_MIC2BCLK;
 		reg_mic2.u32 = aio_read(aio, address);
-		reg_mic2.uMIC2BCLK_SEL = inv;
+		reg_mic2.uMIC2BCLK_INV = inv;
 		aio_write(aio, address, reg_mic2.u32);
 		break;
 	default:
