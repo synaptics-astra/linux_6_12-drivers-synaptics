@@ -428,10 +428,10 @@ static int i2s_mic2_component_hw_free(struct snd_soc_component *component,
 		mic2->irq_requested = false;
 	}
 
-	aio_set_aud_ch_flush(mic2->aio_handle, AIO_ID_SEC_TX, AIO_TSD0, 1);
-
-	if (mic2->rx_force_tx)
+	if (mic2->rx_force_tx) {
+		aio_set_aud_ch_flush(mic2->aio_handle, AIO_ID_SEC_TX, AIO_TSD0, 1);
 		aio_set_aud_ch_en(mic2->aio_handle, AIO_ID_SEC_TX, AIO_TSD0, 0);
+	}
 
 	return 0;
 }
