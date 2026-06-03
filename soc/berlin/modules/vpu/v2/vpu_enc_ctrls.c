@@ -287,7 +287,7 @@ static int vidioc_venc_s_ctrl(struct v4l2_ctrl *ctrl)
 		break;
 	case V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME:
 		vepu_dbg(2, "V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME");
-		venc_ctrls->force_key_frame = ctrl->val;
+		venc_ctrls->force_key_frame = 1;
 		venc_ctrls->apply_dyna_ctrls = true;
 		break;
 	case V4L2_CID_MPEG_VIDEO_HEADER_MODE:
@@ -459,9 +459,9 @@ int vpu_enc_ctrls_init(struct v4l2_ctrl_handler *handler)
 	v4l2_ctrl_new_std(handler, ops, V4L2_CID_MPEG_VIDEO_H264_VUI_SAR_ENABLE,
 			  0, 1, 1, 0);
 	v4l2_ctrl_new_std(handler, ops, V4L2_CID_MPEG_VIDEO_H264_MIN_QP, 0, 51,
-			  1, 10);
+			  1, 0);
 	v4l2_ctrl_new_std(handler, ops, V4L2_CID_MPEG_VIDEO_H264_MAX_QP, 0, 51,
-			  1, 40);
+			  1, 51);
 	v4l2_ctrl_new_std(handler, ops, V4L2_CID_MPEG_VIDEO_H264_I_FRAME_QP, 0,
 			  51, 1, 0);
 	v4l2_ctrl_new_std(handler, ops, V4L2_CID_MPEG_VIDEO_H264_P_FRAME_QP, 0,
@@ -693,7 +693,7 @@ static int vpu_enc_ctrls_to_h1_2ndpass(struct vpu_enc_ctrls *enc_ctrls,
 	v4l2_ctrls_truncate_slice_size(enc_ctrls, frm_width);
 
 	if (enc_ctrls->force_key_frame) {
-		para->pic_type = VENC_PIC_TYPE_I;
+		para->pic_type = VENC_PIC_TYPE_FORCE_IDR;
 		i_frame = true;
 		enc_ctrls->force_key_frame = 0;
 	} else if (enc_ctrls->gop_size) {

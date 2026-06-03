@@ -23,8 +23,8 @@
 #define SYNA_VENC_MAX_AUX_BUFS_NUM	(4U)
 #define SYNA_VENC_MAX_AUX_BUFS_SHIFT	(2U)
 
-#define SYNA_VENC_BITRATE_MIN		(10 * SZ_1K)
-#define SYNA_VENC_BITRATE_MAX		(40 * SZ_1M)
+#define SYNA_VENC_BITRATE_MIN		(10000)
+#define SYNA_VENC_BITRATE_MAX		(40000000)
 
 int syna_vepu_h1_init(struct syna_vpu_dev *vpu);
 int syna_vepu_h1_finalize(struct syna_vpu_dev *vpu);
