@@ -1393,20 +1393,22 @@ int berlin_capture_hw_params(struct snd_pcm_substream *ss,
 	struct snd_pcm_runtime *runtime = ss->runtime;
 	struct berlin_capture *bc = runtime->private_data;
 	struct snd_soc_pcm_runtime *rtd = ss->private_data;
-	//struct device *dev = rtd->platform->dev;
-	struct snd_soc_component *component =
-			snd_soc_rtdcom_lookup(rtd, "syna-berlin-pcm");
-	if (!component)
-		return -EINVAL;
-	struct device *dev = component->dev;
-	struct berlin_chip *chip = dev_get_drvdata(dev);
-	struct platform_device *platform_dev = chip->pdev;
+	struct snd_soc_component *component = snd_soc_rtdcom_lookup(rtd, "syna-berlin-pcm");
+	const size_t pcm_period_size_bytes = params_period_bytes(params);
+	const size_t pcm_buffer_size_bytes = pcm_period_size_bytes * params_periods(params);
+	struct device *dev;
+	struct berlin_chip *chip;
+	struct platform_device *platform_dev;
 	int err;
 	u32 ch_pair_num, ch, i;
 	unsigned long long mic_sleep_us;
-	const size_t pcm_period_size_bytes = params_period_bytes(params);
-	const size_t pcm_buffer_size_bytes =
-		pcm_period_size_bytes * params_periods(params);
+
+	if (!component)
+		return -EINVAL;
+
+	dev = component->dev;
+	chip = dev_get_drvdata(dev);
+	platform_dev = chip->pdev;
 
 	bc->sample_format = params_format(params);
 	bc->pcm_ratio = 1;

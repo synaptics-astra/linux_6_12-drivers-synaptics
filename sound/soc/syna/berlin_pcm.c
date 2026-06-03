@@ -311,10 +311,14 @@ static int berlin_pcm_open(struct snd_soc_component *component,
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_component *c = snd_soc_rtdcom_lookup(rtd, "syna-berlin-pcm");
+	struct berlin_chip *chip;
+	struct device *dev;
+
 	if (!c)
 		return -EINVAL;
-	struct device *dev = c->dev;
-	struct berlin_chip *chip = dev_get_drvdata(dev);
+
+	dev = c->dev;
+	chip = dev_get_drvdata(dev);
 
 	snd_printd("%s stream: %s (%p)\n", __func__,
 		substream->stream == SNDRV_PCM_STREAM_CAPTURE ? "capture" : "playback", substream);

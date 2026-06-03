@@ -735,17 +735,21 @@ int berlin_playback_hw_params(struct snd_pcm_substream *ss,
 	struct snd_pcm_runtime *runtime = ss->runtime;
 	struct berlin_playback *bp = runtime->private_data;
 	struct snd_soc_pcm_runtime *rtd = ss->private_data;
-	struct snd_soc_component *component =
-		snd_soc_rtdcom_lookup(rtd, "syna-berlin-pcm");
-	if (!component)
-		return -EINVAL;
-	struct device *dev = component->dev;
-	struct berlin_chip *chip = dev_get_drvdata(dev);
-	struct platform_device *pdev = chip->pdev;
+	struct snd_soc_component *component = snd_soc_rtdcom_lookup(rtd, "syna-berlin-pcm");
+	struct device *dev;
+	struct berlin_chip *chip;
+	struct platform_device *pdev;
 	struct spdif_cs *chnsts;
 	unsigned int i;
 	int err;
 	u32 periods;
+
+	if (!component)
+		return -EINVAL;
+
+	dev = component->dev;
+	chip = dev_get_drvdata(dev);
+	pdev = chip->pdev;
 
 	snd_printd("%s: fs:%d ch:%d width:%d format:%s, period bytes:%d buffer bytes: %d\n",
 		__func__,
