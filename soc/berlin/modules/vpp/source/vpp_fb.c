@@ -113,13 +113,10 @@ static int create_new_frame(int width, int height, int progressive,
 	bool fb_allocated = false;
 
 	*frame = NULL;
-	shm_handle_fb = kzalloc(sizeof(VPP_MEM), GFP_KERNEL | __GFP_NOWARN);
-	if (!shm_handle_fb)
-		return MV_VPP_ENOMEM;
+	shm_handle_fb = NULL;
 
 	shm_handle_vbuf = kzalloc(sizeof(VPP_MEM), GFP_KERNEL | __GFP_NOWARN);
 	if (!shm_handle_vbuf) {
-		kfree(shm_handle_fb);
 		return MV_VPP_ENOMEM;
 	}
 
@@ -129,6 +126,10 @@ static int create_new_frame(int width, int height, int progressive,
 
 	//Allocate memory for copy/duplicate framebuffer
 	if (vpp_config_param.enable_frame_buf_copy) {
+		shm_handle_fb = kzalloc(sizeof(VPP_MEM), GFP_KERNEL | __GFP_NOWARN);
+		if (!shm_handle_fb)
+			goto err_free_handles;
+
 		if (src_fmt == SRCFMT_YUV422)
 			shm_handle_fb->size = width * height * 2;
 		else
@@ -148,7 +149,9 @@ static int create_new_frame(int width, int height, int progressive,
 	}
 
 	//initialize VBUFINFO members
-	build_frames(vbufinfo, shm_handle_fb->k_addr, src_fmt, bit_depth,
+	build_frames(vbufinfo,
+			shm_handle_fb ? shm_handle_fb->k_addr : NULL,
+			src_fmt, bit_depth,
 			0, 0, width, height,
 			progressive, pattern_type, 1);
 
