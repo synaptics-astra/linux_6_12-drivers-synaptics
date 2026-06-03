@@ -774,7 +774,7 @@ static int dolphin_pll_setup(struct platform_device *pdev)
 
 	ret = devm_clk_hw_register(dev, &pll->hw);
 	if (ret)
-		return ret;
+		goto err_put_bypass_clk;
 
 	snprintf(name, sizeof(name), "%s_clko1", dev->of_node->name);
 	init.ops = &dolphin_pll_clko1_ops;
@@ -786,7 +786,7 @@ static int dolphin_pll_setup(struct platform_device *pdev)
 
 	ret = devm_clk_hw_register(dev, &pll->hw1);
 	if (ret)
-		return ret;
+		goto err_put_bypass_clk;
 
 	clk_data->hws[0] = &pll->hw;
 	clk_data->hws[1] = &pll->hw1;
@@ -799,10 +799,14 @@ static int dolphin_pll_setup(struct platform_device *pdev)
 	ret = devm_of_clk_add_hw_provider(dev, of_clk_hw_onecell_get,
 					  clk_data);
 	if (ret)
-		return ret;
+		goto err_put_bypass_clk;
 
 	platform_set_drvdata(pdev, pll);
 	return 0;
+
+err_put_bypass_clk:
+	clk_put(pll->bypass_clk);
+	return ret;
 }
 
 #ifdef CONFIG_PM_SLEEP
