@@ -63,7 +63,7 @@ static const char *get_path_name(u32 path_id)
 {
 	const char *name[MAX_OUTPUT_AUDIO] = {"ma0", "loro", "spdif", "hdmi"};
 
-	if (path_id > MAX_OUTPUT_AUDIO)
+	if (path_id >= MAX_OUTPUT_AUDIO)
 		return NULL;
 	return name[path_id];
 }
@@ -178,7 +178,12 @@ static u32 aout_map_path(struct aout_priv *aout, int irq)
 
 static inline u32 get_chanId(struct aout_priv *aout, u32 channel)
 {
-	return irqd_to_hwirq(irq_get_irq_data(channel));
+	struct irq_data *irq_data = irq_get_irq_data(channel);
+
+	if (!irq_data)
+		return INVALID_CHAN_ID;
+
+	return irqd_to_hwirq(irq_data);
 }
 
 static void aout_start_cmd(struct aout_priv *aout,
@@ -217,6 +222,8 @@ static void aout_start_cmd(struct aout_priv *aout,
 
 	aout->ap[path_id].cmd_fifo = (AOUT_PATH_CMD_FIFO *)param;
 	chanId0 = get_chanId(aout, aout->ap[path_id].irq);
+	if (chanId0 == INVALID_CHAN_ID)
+		return;
 	p_dma_info = (AOUT_DMA_INFO *) AoutFifoGetKernelRdDMAInfo(
 			aout->ap[path_id].cmd_fifo, 0);
 	chanId = chanId0;
@@ -412,11 +419,16 @@ static irqreturn_t devices_aout_isr(int irq, void *dev_id)
 	u32 chanId;
 	irq_hw_number_t hw_irq;
 	struct aout_priv *aout = (struct aout_priv *) dev_id;
+	struct irq_data *irq_data;
 	HRESULT rc;
 	int path_id;
 	CC_MSG_t msg = { 0, 0, 0 };
 
-	hw_irq = irqd_to_hwirq(irq_get_irq_data(irq));
+	irq_data = irq_get_irq_data(irq);
+	if (!irq_data)
+		return IRQ_NONE;
+
+	hw_irq = irqd_to_hwirq(irq_data);
 	chanId = hw_irq;
 	path_id = aout_map_path(aout, irq);
 
@@ -435,16 +447,21 @@ static int drv_request_irq(struct aout_priv *aout, u32 path)
 	int err = 0;
 	u32 irq;
 	u8 *name;
+	struct irq_data *irq_data;
 
 	aout_enter_func();
 
 	irq = aout->ap[path].irq;
-	if (irq < 0)
+	if (!irq)
 		return -EINVAL;
 
 	name = &aout_irq_name[path][0];
+	irq_data = irq_get_irq_data(irq);
+	if (!irq_data)
+		return -EINVAL;
+
 	snprintf(name, sizeof(aout_irq_name)/MAX_OUTPUT_AUDIO, "AUDIO DHUB %d",
-		(u32)irqd_to_hwirq(irq_get_irq_data(irq)));
+		(u32)irqd_to_hwirq(irq_data));
 	err = request_irq(irq, devices_aout_isr,
 			 IRQF_SHARED, name, aout);
 	if (unlikely(err < 0))
@@ -457,17 +474,19 @@ static int drv_request_irq(struct aout_priv *aout, u32 path)
 static s32 user_getchannelfrompath(
 	struct aout_priv *aout, u32 path)
 {
-	u32 irq = aout->ap[path].irq;
-
 	if (path >= MAX_OUTPUT_AUDIO) {
 		aout_error("undefined path %d\n", path);
 		return INVALID_CHAN_ID;
 	}
 
-	if (irq >= 0)
-		return get_chanId(aout, irq);
-	else
-		return INVALID_CHAN_ID;
+	{
+		u32 irq = aout->ap[path].irq;
+
+		if (irq)
+			return get_chanId(aout, irq);
+	}
+
+	return INVALID_CHAN_ID;
 }
 
 static u32 AOUT_HAL_GetdHubChanId(struct aout_priv *aout,
@@ -930,7 +949,7 @@ static int user_aio_enable_audio_timer(struct aout_priv *aout, u32 en)
 
 static int user_aio_get_audio_timer(struct aout_priv *aout)
 {
-	u32 val;
+	u32 val = 0;
 
 	aio_get_audio_timer(aout->aio_hd, &val);
 	return val;
@@ -948,7 +967,7 @@ static int user_aio_set_sampinfo_req(struct aout_priv *aout, u32 idx, u32 en)
 
 static int user_aio_get_audio_counter(struct aout_priv *aout, u32 idx)
 {
-	u32 c;
+	u32 c = 0;
 
 	aio_get_audio_counter(aout->aio_hd, idx, &c);
 	return c;
@@ -956,7 +975,7 @@ static int user_aio_get_audio_counter(struct aout_priv *aout, u32 idx)
 
 static int user_aio_get_audio_timestamp(struct aout_priv *aout, u32 idx)
 {
-	u32 t;
+	u32 t = 0;
 
 	aio_get_audio_timestamp(aout->aio_hd, idx, &t);
 	return t;
@@ -1091,7 +1110,7 @@ static int aio_cmd_parse(char *cmd_str,
 
 	idx = 0;
 	while ((token = strsep(&cmd_str, " ")) &&
-			  idx <= (MAX_CMD_PARAMETER_NUMBER + 1)) {
+			  idx < (MAX_CMD_PARAMETER_NUMBER + 1)) {
 		cmd_array[idx++] = token;
 	}
 
@@ -1372,7 +1391,7 @@ static LONG drv_aout_ioctl_unlocked(struct file *filp, u32 cmd, ULONG arg)
 	struct dma_buf *buf = NULL;
 	void *param = NULL;
 	u32 path_id;
-	struct iosys_map map;
+	struct iosys_map map = { 0 };
 
 	switch (cmd) {
 	/**************************************
