@@ -1098,8 +1098,8 @@ static void vb2ops_venc_buf_queue(struct vb2_buffer *vb)
 
 		if (ctx->v4l2_ctrls.apply_dyna_ctrls) {
 			vpu_enc_ctrls_v4l2_to_h1(
-				&ctx->v4l2_ctrls, 0, ctx->input_pic_seq,
-				ctx->src_fmt.width, NULL,
+				&ctx->v4l2_ctrls, ctx->dst_fmt.pixelformat,
+				ctx->input_pic_seq, ctx->src_fmt.width, NULL,
 				&ctrl->venc_2ndpass_para[vb->index], NULL);
 			SET_BIT(vb->index, ctrl->venc_2ndpass_para_stats);
 		}

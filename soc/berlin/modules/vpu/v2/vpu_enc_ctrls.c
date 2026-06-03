@@ -231,6 +231,30 @@ static int vidioc_venc_s_ctrl(struct v4l2_ctrl *ctrl)
 		venc_ctrls->h264_p_frame_qp = ctrl->val;
 		venc_ctrls->apply_dyna_ctrls = true;
 		break;
+	case V4L2_CID_MPEG_VIDEO_VPX_I_FRAME_QP:
+		vepu_dbg(2, "V4L2_CID_MPEG_VIDEO_VPX_I_FRAME_QP val = %d",
+			 ctrl->val);
+		if (ctrl->val && (ctrl->val < venc_ctrls->vpx_min_qp ||
+				  ctrl->val > venc_ctrls->vpx_max_qp)) {
+			ret = -ERANGE;
+			break;
+		}
+
+		venc_ctrls->vpx_i_frame_qp = ctrl->val;
+		venc_ctrls->apply_dyna_ctrls = true;
+		break;
+	case V4L2_CID_MPEG_VIDEO_VPX_P_FRAME_QP:
+		vepu_dbg(2, "V4L2_CID_MPEG_VIDEO_VPX_P_FRAME_QP val = %d",
+			 ctrl->val);
+		if (ctrl->val && (ctrl->val < venc_ctrls->vpx_min_qp ||
+				  ctrl->val > venc_ctrls->vpx_max_qp)) {
+			ret = -ERANGE;
+			break;
+		}
+
+		venc_ctrls->vpx_p_frame_qp = ctrl->val;
+		venc_ctrls->apply_dyna_ctrls = true;
+		break;
 	case V4L2_CID_MPEG_VIDEO_H264_8X8_TRANSFORM:
 		vepu_dbg(2, "V4L2_CID_MPEG_VIDEO_H264_8X8_TRANSFORM val = %d",
 			 ctrl->val);
@@ -442,6 +466,14 @@ int vpu_enc_ctrls_init(struct v4l2_ctrl_handler *handler)
 			  51, 1, 0);
 	v4l2_ctrl_new_std(handler, ops, V4L2_CID_MPEG_VIDEO_H264_P_FRAME_QP, 0,
 			  51, 1, 0);
+	v4l2_ctrl_new_std(handler, ops, V4L2_CID_MPEG_VIDEO_VPX_MIN_QP, 0,
+			  127, 1, 0);
+	v4l2_ctrl_new_std(handler, ops, V4L2_CID_MPEG_VIDEO_VPX_MAX_QP, 0,
+			  127, 1, 127);
+	v4l2_ctrl_new_std(handler, ops, V4L2_CID_MPEG_VIDEO_VPX_I_FRAME_QP, 0,
+			  127, 1, 0);
+	v4l2_ctrl_new_std(handler, ops, V4L2_CID_MPEG_VIDEO_VPX_P_FRAME_QP, 0,
+			  127, 1, 0);
 	v4l2_ctrl_new_std(handler, ops, V4L2_CID_MPEG_VIDEO_GOP_SIZE, 0, 65535,
 			  1, 30);
 	v4l2_ctrl_new_std(handler, ops, V4L2_CID_MPEG_VIDEO_MB_RC_ENABLE, 0, 1,
@@ -652,7 +684,8 @@ static int v4l2_ctrls_to_h1_strm_config(struct vpu_enc_ctrls *enc_ctrls,
 }
 
 static int vpu_enc_ctrls_to_h1_2ndpass(struct vpu_enc_ctrls *enc_ctrls,
-				       u32 pic_seq, u32 frm_width,
+				       u32 codec_fmt, u32 pic_seq,
+				       u32 frm_width,
 				       struct syna_venc_2ndpass_param *para)
 {
 	bool i_frame = false;
@@ -680,17 +713,27 @@ static int vpu_enc_ctrls_to_h1_2ndpass(struct vpu_enc_ctrls *enc_ctrls,
 	switch (enc_ctrls->bitrate_mode) {
 	case V4L2_MPEG_VIDEO_BITRATE_MODE_VBR:
 		if (i_frame)
-			para->pic_qp = enc_ctrls->h264_i_frame_qp;
+			para->pic_qp = codec_fmt == V4L2_PIX_FMT_H264 ?
+						     enc_ctrls->h264_i_frame_qp :
+						     enc_ctrls->vpx_i_frame_qp;
 		else
-			para->pic_qp = enc_ctrls->h264_p_frame_qp;
+			para->pic_qp = codec_fmt == V4L2_PIX_FMT_H264 ?
+						     enc_ctrls->h264_p_frame_qp :
+						     enc_ctrls->vpx_p_frame_qp;
 		break;
 	case V4L2_MPEG_VIDEO_BITRATE_MODE_CBR:
 		if (i_frame) {
-			para->pic_qp = enc_ctrls->h264_i_frame_qp;
+			para->pic_qp = codec_fmt == V4L2_PIX_FMT_H264 ?
+						     enc_ctrls->h264_i_frame_qp :
+						     enc_ctrls->vpx_i_frame_qp;
 			enc_ctrls->h264_i_frame_qp = 0;
+			enc_ctrls->vpx_i_frame_qp = 0;
 		} else {
-			para->pic_qp = enc_ctrls->h264_p_frame_qp;
+			para->pic_qp = codec_fmt == V4L2_PIX_FMT_H264 ?
+						     enc_ctrls->h264_p_frame_qp :
+						     enc_ctrls->vpx_p_frame_qp;
 			enc_ctrls->h264_p_frame_qp = 0;
+			enc_ctrls->vpx_p_frame_qp = 0;
 		}
 		break;
 	default:
@@ -736,8 +779,8 @@ int vpu_enc_ctrls_v4l2_to_h1(struct vpu_enc_ctrls *enc_ctrls, u32 codec_fmt,
 	}
 
 	if (para) {
-		ret = vpu_enc_ctrls_to_h1_2ndpass(enc_ctrls, pic_seq, frm_width,
-						  para);
+		ret = vpu_enc_ctrls_to_h1_2ndpass(enc_ctrls, codec_fmt, pic_seq,
+						  frm_width, para);
 		if (ret)
 			return ret;
 	}

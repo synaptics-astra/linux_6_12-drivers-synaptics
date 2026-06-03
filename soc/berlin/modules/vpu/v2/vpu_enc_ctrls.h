@@ -53,6 +53,8 @@ struct vpu_enc_ctrls {
 	u32 vp8_profile;
 	u32 vpx_min_qp;
 	u32 vpx_max_qp;
+	u32 vpx_i_frame_qp;
+	u32 vpx_p_frame_qp;
 
 	struct ltr_ctrls ltr_ctrls;
 	u32 multi_slice_mode;
