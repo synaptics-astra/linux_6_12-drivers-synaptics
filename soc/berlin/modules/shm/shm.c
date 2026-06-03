@@ -650,7 +650,7 @@ static int shm_get_pa(struct shm_misc_data *data)
 		pr_err("%s: fail to find the buf from gid[%08x].\n",
 				__func__, data->gid);
 		up_read(&shm_dev.idr_lock);
-		return PTR_ERR(bn);
+		return -EINVAL;
 	}
 	ret = buffer_inc_ref(bn);
 	if (ret) {
@@ -832,8 +832,7 @@ static int shm_sync(struct shm_sync_data *data)
 	int ret = 0;
 	struct berlin_buffer_node *bn;
 
-	if (data->op < SHM_INVALIDATE_CACHE
-		|| data->op > SHM_FLUSH_CACHE)
+	if (data->op > SHM_FLUSH_CACHE)
 		return -EINVAL;
 
 	down_read(&shm_dev.idr_lock);
