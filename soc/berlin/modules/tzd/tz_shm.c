@@ -78,7 +78,7 @@ static int tzd_dmabuf_heap_shm_alloc(struct tzd_shm *tzshm, gfp_t flags)
 	struct dma_buf *nc_dma_buf;
 	struct dma_buf_attachment * attach;
 	struct sg_table *table;
-	struct iosys_map map;
+	struct iosys_map map = {};
 
 	nc_dma_buf = dma_heap_buffer_alloc(nc_dma_heap, tzshm->len, 0, 0);
 	if (IS_ERR_OR_NULL(nc_dma_buf)) {

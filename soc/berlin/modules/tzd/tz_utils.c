@@ -64,7 +64,6 @@ unsigned long tz_user_virt_to_pte(struct mm_struct *mm, unsigned long address)
 
 	ptep = pte_offset_map_lock(mm, pmd, address, &lock);
 	if (!ptep) {
-		pte_unmap_unlock(ptep, lock);
 		return 0;
 	}
 	pte = *ptep;

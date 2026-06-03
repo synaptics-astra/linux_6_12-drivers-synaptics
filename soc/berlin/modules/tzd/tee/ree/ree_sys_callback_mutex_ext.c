@@ -73,6 +73,8 @@ TEE_Result REESysCmd_MutexWait(
 	int key = params[0].value.a;
 
 	w = mutex_wait_get(key, &tee_wait_list);
+	if (!w)
+		return TEE_ERROR_OUT_OF_MEMORY;
 
 	/*
 	 * if interrupted, give app a chance to handle some signal
@@ -94,6 +96,8 @@ TEE_Result REESysCmd_MutexWake(
 	int key = params[0].value.a;
 
 	w = mutex_wait_get(key, &tee_wait_list);
+	if (!w)
+		return TEE_ERROR_OUT_OF_MEMORY;
 
 	complete(&w->comp);
 
