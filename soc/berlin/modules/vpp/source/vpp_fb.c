@@ -110,7 +110,9 @@ static int create_new_frame(int width, int height, int progressive,
 	VPP_MEM *shm_handle_fb;
 	VPP_MEM *shm_handle_vbuf;
 	int result;
+	bool fb_allocated = false;
 
+	*frame = NULL;
 	shm_handle_fb = kzalloc(sizeof(VPP_MEM), GFP_KERNEL | __GFP_NOWARN);
 	if (!shm_handle_fb)
 		return MV_VPP_ENOMEM;
@@ -123,7 +125,7 @@ static int create_new_frame(int width, int height, int progressive,
 
 	vbufinfo  = kzalloc(sizeof(VBUF_INFO), GFP_KERNEL | __GFP_NOWARN);
 	if (!vbufinfo)
-		return MV_VPP_ENOMEM;
+		goto err_free_handles;
 
 	//Allocate memory for copy/duplicate framebuffer
 	if (vpp_config_param.enable_frame_buf_copy) {
@@ -138,6 +140,7 @@ static int create_new_frame(int width, int height, int progressive,
 			pr_err("share memory allocation failed\n");
 			goto err_free_vbufinfo;
 		}
+		fb_allocated = true;
 
 		vbufinfo->hShm_fb = shm_handle_fb;
 		vbufinfo->m_pbuf_start = (ARCH_PTR_TYPE)shm_handle_fb->p_addr;
@@ -155,7 +158,7 @@ static int create_new_frame(int width, int height, int progressive,
 				shm_handle_vbuf, GFP_KERNEL | __GFP_NOWARN);
 	if (result != VPP_MEM_ERROR_TYPE_OK) {
 		pr_err("share memory allocation failed\n");
-		goto err;
+		goto err_free_fb_and_handles;
 	}
 
 	vbufinfo->hShm_vbuf = shm_handle_vbuf;
@@ -165,16 +168,16 @@ static int create_new_frame(int width, int height, int progressive,
 	*frame = vbufinfo;
 	return MV_VPP_OK;
 
-err:
-	if (vpp_config_param.enable_frame_buf_copy)
-		if (shm_handle_fb)
-			VPP_MEM_FreeMemory(vpp_shm_list, VPP_MEM_TYPE_DMA, shm_handle_fb);
-err_free_vbufinfo:
-	if (vpp_config_param.enable_frame_buf_copy) {
-		kfree(vbufinfo);
-		*frame = NULL;
-	}
+err_free_fb_and_handles:
+	if (vpp_config_param.enable_frame_buf_copy && fb_allocated)
+		VPP_MEM_FreeMemory(vpp_shm_list, VPP_MEM_TYPE_DMA, shm_handle_fb);
 
+err_free_vbufinfo:
+	kfree(vbufinfo);
+
+err_free_handles:
+	kfree(shm_handle_fb);
+	kfree(shm_handle_vbuf);
 	return MV_VPP_ENOMEM;
 }
 
