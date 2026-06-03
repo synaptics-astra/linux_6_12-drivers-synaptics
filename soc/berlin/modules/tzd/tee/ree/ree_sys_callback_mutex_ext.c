@@ -37,9 +37,11 @@ struct mutex_wait {
 static struct mutex_wait_list tee_wait_list;
 
 static struct mutex_wait *mutex_wait_get(uint32_t key,
-					struct mutex_wait_list *wait_list)
+					struct mutex_wait_list *wait_list,
+					bool *is_new)
 {
 	struct mutex_wait *w = NULL;
+	bool new = false;
 
 	mutex_lock(&wait_list->mu);
 
@@ -57,7 +59,10 @@ static struct mutex_wait *mutex_wait_get(uint32_t key,
 	w->wait_after = 0;
 	w->key = key;
 	list_add_tail(&w->link, &wait_list->lh);
+	new = true;
 out:
+	if (is_new)
+		*is_new = new;
 	mutex_unlock(&wait_list->mu);
 	return w;
 }
@@ -70,17 +75,26 @@ TEE_Result REESysCmd_MutexWait(
 		uint32_t		param_ext_size)
 {
 	struct mutex_wait *w;
+	bool is_new = false;
 	int key = params[0].value.a;
 
-	w = mutex_wait_get(key, &tee_wait_list);
+	w = mutex_wait_get(key, &tee_wait_list, &is_new);
 	if (!w)
 		return TEE_ERROR_OUT_OF_MEMORY;
 
 	/*
 	 * if interrupted, give app a chance to handle some signal
 	 */
-	if (-ERESTARTSYS == wait_for_completion_interruptible(&w->comp))
+	if (-ERESTARTSYS == wait_for_completion_interruptible(&w->comp)) {
+		if (is_new) {
+			mutex_lock(&tee_wait_list.mu);
+			list_del(&w->link);
+			mutex_destroy(&w->mu);
+			mutex_unlock(&tee_wait_list.mu);
+			kfree(w);
+		}
 		return TEE_ERROR_NOT_SUPPORTED;
+	}
 
 	return TEE_SUCCESS;
 }
@@ -95,9 +109,10 @@ TEE_Result REESysCmd_MutexWake(
 	struct mutex_wait *w;
 	int key = params[0].value.a;
 
-	w = mutex_wait_get(key, &tee_wait_list);
-	if (!w)
+	w = mutex_wait_get(key, &tee_wait_list, NULL);
+	if (!w) {
 		return TEE_ERROR_OUT_OF_MEMORY;
+	}
 
 	complete(&w->comp);
 
