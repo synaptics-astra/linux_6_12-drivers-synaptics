@@ -905,7 +905,7 @@ static void set_aio_clock(struct aout_priv *aout, u32 path)
 static int user_aout_setpath(struct aout_priv *aout,
 		u32 p1, u32 p2, u32 p3, u32 p4)
 {
-	u8 i;
+	int i;
 	int err = 0;
 	const char *path_name;
 
