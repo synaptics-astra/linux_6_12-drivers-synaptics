@@ -103,7 +103,7 @@ static int berlin_cc_reg(struct berlin_cc_client *client,
 {
 	struct berlin_cc_info *tmp;
 	struct berlin_gid_node *node;
-	unsigned int new_gid = 0;
+	int new_gid = 0;
 
 	pr_debug("%s start sid[%08x]\n", __func__, info->m_ServiceID);
 	if (!info)
