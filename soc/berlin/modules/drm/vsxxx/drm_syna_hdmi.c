@@ -164,7 +164,7 @@ static int syna_hdmi_connector_helper_get_modes(struct drm_connector *connector)
 {
 	struct syna_conn_hdmi *syna_hdmi = to_syna_conn_hdmi(connector);
 	int len = strlen(preferred_mode_name);
-	int num_modes;
+	uint32_t num_modes;
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 11, 0))
 	const struct drm_edid *hdmi_edid = drm_edid_read_custom(connector,
@@ -180,17 +180,26 @@ static int syna_hdmi_connector_helper_get_modes(struct drm_connector *connector)
 	else
 		DRM_DEBUG_DRIVER("no hdmi_preferred_mode\n");
 
-	if ((hdmi_edid == NULL) &&
-		!syna_hdmi->syna_hdmi_conf.hdmiTxConfigFields.hpdHandlingEnabled) {
-		/* load dummy edid as bootup without sink and no hpd handling enabled*/
-		num_modes = drm_add_modes_noedid(connector, 1920, 1080);
-		if (!len) {
-			strncpy(preferred_mode_name, "1920x1080", DRM_DISPLAY_MODE_LEN);
-			len = strlen(preferred_mode_name);
+	if (hdmi_edid == NULL) {
+		drm_connector_update_edid_property(connector, NULL);
+		if (!syna_hdmi->syna_hdmi_conf.hdmiTxConfigFields.hpdHandlingEnabled) {
+			/* Keep legacy behavior: use default mode list when HPD handling is disabled. */
+			num_modes = drm_add_modes_noedid(connector, 1920, 1080);
+			DRM_ERROR("Failed to read EDID, fallback to default mode list\n");
+			if (!len) {
+				strncpy(preferred_mode_name, "1920x1080", DRM_DISPLAY_MODE_LEN);
+				len = strlen(preferred_mode_name);
+			}
+		} else {
+			/* With HPD handling enabled, avoid dummy modes on transient sink failures. */
+			DRM_ERROR("Failed to read EDID with HPD handling enabled\n");
+			num_modes = 0;
 		}
+
+#if IS_ENABLED(CONFIG_CEC_CORE)
+		cec_notifier_phys_addr_invalidate(syna_hdmi->cec);
+#endif
 	} else {
-		/* even if hpd handling is disabled, if read EDID can be parsed on
-		   startup, use the read edid instead of hardcoded */
 		DRM_DEBUG_DRIVER("Edid obtained and parsed \n");
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 11, 0))
@@ -199,15 +208,15 @@ static int syna_hdmi_connector_helper_get_modes(struct drm_connector *connector)
 #if IS_ENABLED(CONFIG_CEC_CORE)
 		cec_notifier_set_phys_addr_from_edid(syna_hdmi->cec, hdmi_edid->edid);
 #endif
+		drm_edid_free(hdmi_edid);
 #else
 		drm_connector_update_edid_property(connector, hdmi_edid);
 		num_modes = drm_add_edid_modes(connector, hdmi_edid);
 #if IS_ENABLED(CONFIG_CEC_CORE)
 		cec_notifier_set_phys_addr_from_edid(syna_hdmi->cec, hdmi_edid);
 #endif
-#endif
-
 		kfree(hdmi_edid);
+#endif
 	}
 
 
