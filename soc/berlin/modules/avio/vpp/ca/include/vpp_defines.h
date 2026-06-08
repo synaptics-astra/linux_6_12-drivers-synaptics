@@ -70,6 +70,8 @@ enum {
 	FRAME_RATE_100	  = 10,
 	FRAME_RATE_119P88 = 11,
 	FRAME_RATE_120	  = 12,
+	FRAME_RATE_89P91  = 13,
+	FRAME_RATE_90     = 14
 };
 
 /* definition of display mode */
