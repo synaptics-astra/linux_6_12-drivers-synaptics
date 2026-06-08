@@ -1212,6 +1212,7 @@ static int aio_init(struct aout_priv *aout)
 	}
 	aout_trace("get aio hd %p\n", aout->aio_hd);
 	mutex_init(&aout->aio_mutex);
+	mutex_init(&aout->aout_mutex);
 
 	aio_clk_enable(aout->aio_hd, AIO_APLL_0, true);
 	aio_set_clk_rate(aout->aio_hd, AIO_APLL_0, APLL_RATE_48K);
@@ -1354,24 +1355,35 @@ static void wrap_aout_start_cmd(struct aout_priv *aout,
 
 static void drv_aout_release_shm(struct aout_priv *aout, int path_id)
 {
-	struct iosys_map map = IOSYS_MAP_INIT_VADDR(aout->ap[path_id].shm.p);
+	struct dma_buf *buf;
+	int gid;
 
-	if (IS_ERR_OR_NULL(aout->ap[path_id].shm.buf))
+	mutex_lock(&aout->aout_mutex);
+	buf = aout->ap[path_id].shm.buf;
+	if (IS_ERR_OR_NULL(buf)) {
+		mutex_unlock(&aout->aout_mutex);
 		return;
+	}
 
-	aout_trace("aout->shm.buf[%d] = %p\n", path_id,
-		 aout->ap[path_id].shm.buf);
-	aout_trace("aout->shm.p[%d] = %p\n", path_id,
-		 aout->ap[path_id].shm.p);
-	aout_trace("aout->shm.gid[%d] = %d\n", path_id,
-		 aout->ap[path_id].shm.gid);
-	dma_buf_end_cpu_access(
-		aout->ap[path_id].shm.buf, DMA_BIDIRECTIONAL);
-	dma_buf_vunmap(aout->ap[path_id].shm.buf, &map);
-	shm_put(aout->client, aout->ap[path_id].shm.gid);
-	aout->ap[path_id].shm.gid = 0;
-	aout->ap[path_id].shm.p = NULL;
-	aout->ap[path_id].shm.buf = NULL;
+	aout_trace("Releasing shm for path %d: buf=%p, p=%p, gid=%d\n",
+		path_id, buf, aout->ap[path_id].shm.p, aout->ap[path_id].shm.gid);
+
+	if (aout->cpu_access_begin[path_id]) {
+		dma_buf_end_cpu_access(
+			aout->ap[path_id].shm.buf, DMA_BIDIRECTIONAL);
+		aout->cpu_access_begin[path_id] = false;
+	}
+	if (aout->v_mapped[path_id]) {
+		struct iosys_map map = IOSYS_MAP_INIT_VADDR(aout->ap[path_id].shm.p);
+		dma_buf_vunmap(aout->ap[path_id].shm.buf, &map);
+		gid = aout->ap[path_id].shm.gid;
+		aout->ap[path_id].shm.gid = 0;
+		aout->ap[path_id].shm.p = NULL;
+		aout->ap[path_id].shm.buf = NULL;
+		aout->v_mapped[path_id] = false;
+		shm_put(aout->client, gid);
+	}
+	mutex_unlock(&aout->aout_mutex);
 }
 
 static void wrap_aout_stop_cmd(struct aout_priv *aout, int path_id)
@@ -1431,22 +1443,36 @@ static LONG drv_aout_ioctl_unlocked(struct file *filp, u32 cmd, ULONG arg)
 		}
 
 		aout_trace("gid = %d, dma_buf size = %zx\n", gid, buf->size);
+		mutex_lock(&aout->aout_mutex);
+		if (aout->v_mapped[path_id]) {
+			mutex_unlock(&aout->aout_mutex);
+			aout_error("Path %d is already mapped!\n", path_id);
+			ret = -EBUSY;
+			goto error;
+		}
+
 		ret = dma_buf_begin_cpu_access(buf, DMA_BIDIRECTIONAL);
 		if (ret) {
+			mutex_unlock(&aout->aout_mutex);
 			aout_error("error in beginning cpu access: %d\n", ret);
 			shm_put(aout->client, gid);
 			goto error;
 		}
+		aout->cpu_access_begin[path_id] = true;
 		ret = dma_buf_vmap(buf, &map);
 		if (ret) {
 			dma_buf_end_cpu_access(buf, DMA_BIDIRECTIONAL);
+			aout->cpu_access_begin[path_id] = false;
+			mutex_unlock(&aout->aout_mutex);
 			shm_put(aout->client, gid);
 			goto error;
 		}
+		aout->v_mapped[path_id] = true;
 		param = map.vaddr;
 		aout_trace("buf(%p), mapping to %p\n", buf, param);
 		aout->ap[path_id].shm.p = param;
 		aout->ap[path_id].shm.gid = gid;
+		mutex_unlock(&aout->aout_mutex);
 		wrap_aout_start_cmd(aout, aout_info, param);
 error:
 		break;

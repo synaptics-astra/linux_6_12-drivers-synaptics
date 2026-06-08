@@ -94,6 +94,8 @@ struct aout_priv {
 	struct proc_dir_entry *dev_procdir;
 
 	struct aout_path ap[MAX_OUTPUT_AUDIO];
+	bool cpu_access_begin[MAX_OUTPUT_AUDIO];
+	bool v_mapped[MAX_OUTPUT_AUDIO];
 
 	spinlock_t aout_spinlock;
 	struct semaphore aout_sem;
@@ -102,6 +104,7 @@ struct aout_priv {
 	HDL_dhub *dhub;
 	void *aio_hd;
 	struct mutex aio_mutex;
+	struct mutex aout_mutex;
 };
 
 #define aout_trace(...)  pr_debug(__VA_ARGS__)
