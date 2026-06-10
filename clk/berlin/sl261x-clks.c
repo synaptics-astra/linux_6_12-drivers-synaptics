@@ -12,6 +12,7 @@
 #include <linux/module.h>
 
 #include "clk.h"
+#include "sl-sysmgr-clk.h"
 
 static const struct gateclk_desc sl261x_gates[] = {
 	{ "usb0coreclk",	"perifsysclk",	0 },
@@ -92,11 +93,61 @@ static int sl261x_clk_setup(struct platform_device *pdev)
 	return berlin_clk_setup(pdev, sl261x_descs, ARRAY_SIZE(sl261x_descs));
 }
 
+static const struct sl_sysmgr_gateclk_desc sl261x_sysmgr_gates[] = {
+	{ "clk_cfg_uart0",	"clk_mcu_apb",	0 },
+	{ "clk_ser_uart0",	"clk_mcu_ref",	1 },
+	{ "clk_cfg_uart1",	"clk_mcu_apb",	2 },
+	{ "clk_cfg_uart2",	"clk_mcu_apb",	3 },
+	{ "clk_cfg_uart3",	"clk_mcu_apb",	4 },
+	{ "clk_cfg_gpio",	"clk_mcu_apb",	5 },
+	{ "clk_cfg_i2cm0",	"clk_mcu_apb",	6 },
+	{ "clk_cfg_i2cm1",	"clk_mcu_apb",	7 },
+	{ "clk_cfg_spim",	"clk_mcu_apb",	8 },
+	{ "clk_cfg_spis",	"clk_mcu_apb",	9 },
+	{ "clk_cfg_i3c",	"clk_mcu_apb",	10 },
+	{ "clk_cfg_xspi",	"clk_mcu_apb",	11 },
+	{ "clk_axi_xspi",	"clk_mcu_axi",	12 },
+	{ "clk_cfg_pvt",	"clk_mcu_apb",	13 },
+	{ "clk_cfg_adc",	"clk_mcu_apb",	14 },
+	{ "clk_cfg_pwm",	"clk_mcu_apb",	15 },
+	{ "clk_bus_can0",	"clk_mcu_axi",	16 },
+	{ "clk_bus_can1",	"clk_mcu_axi",	17 },
+	{ "clk_cfg_pdm",	"clk_mcu_apb",	18 },
+};
+
+static const struct sl_sysmgr_clk_desc sl261x_sysmgr_clks[] = {
+	{ "clk_ser_uart1",	"clk_mcu_pll",		0x4,	4 },
+	{ "clk_ser_uart2",	"clk_mcu_pll",		0x8,	4 },
+	{ "clk_ser_uart3",	"clk_mcu_pll",		0xc,	4 },
+	{ "clk_deb_gpio",	"clk_mcu_pll",		0x10,	4 },
+	{ "clk_ser_i2cm0",	"clk_mcu_pll",		0x14,	4 },
+	{ "clk_ser_i2cm1",	"clk_mcu_pll",		0x18,	4 },
+	{ "clk_ser_spim",	"clk_mcu_pll",		0x1c,	4 },
+	{ "clk_ser_spis",	"clk_mcu_pll",		0x20,	4 },
+	{ "clk_ser_i3c",	"clk_mcu_pll",		0x24,	4 },
+	{ "clk_ser_xspi",	"clk_mcu_io_pll",	0x28,	4 },
+	{ "clk_hs_pvt",		"clk_mcu_pll",		0x2c,	4 },
+	{ "clk_core_adc",	"clk_mcu_pll",		0x30,	8 },
+	{ "clk_per_pwm",	"clk_mcu_pll",		0x34,	4 },
+	{ "clk_ser_can0",	"clk_mcu_pll",		0x38,	4 },
+	{ "clk_ser_can1",	"clk_mcu_pll",		0x3c,	4 },
+	{ "clk_ser_pdm",	"clk_mcu_pll",		0x40,	8 },
+	{ "clk_ref_calib",	"clk_mcu_pll",		0x44,	8 },
+};
+
+static int sl261x_sysmgr_clk_setup(struct platform_device *pdev)
+{
+	return sl_sysmgr_clk_setup(pdev, sl261x_sysmgr_gates, ARRAY_SIZE(sl261x_sysmgr_gates), 0,
+				   sl261x_sysmgr_clks, ARRAY_SIZE(sl261x_sysmgr_clks));
+}
+
 static const struct of_device_id sl261x_clks_match_table[] = {
 	{ .compatible = "syna,sl261x-clk",
 	  .data = sl261x_clk_setup },
 	{ .compatible = "syna,sl261x-gateclk",
 	  .data = sl261x_gateclk_setup },
+	{ .compatible = "syna,sl261x-sysmgr-clk",
+	  .data = sl261x_sysmgr_clk_setup },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, sl261x_clks_match_table);

@@ -18,6 +18,12 @@ config SYNA_CLK_BASE
 	help
 	  Build the base clk driver for synaptics SOCs.
 
+config SL_SYSMGR_CLK
+	tristate "Synaptics SL SoCs SysMgr domain clk driver"
+	depends on ARCH_BERLIN
+	help
+	  Build the clk driver for sysmgr domain in Synaptics SL SoCs
+
 config SYNA_AS370_CLK
 	tristate "Synaptics AS370 SOC's switch/gate clk drivers"
 	depends on SYNA_CLK_BASE
@@ -50,7 +56,7 @@ config SYNA_DOLPHIN_CLK
 
 config SYNA_SL261X_CLK
 	tristate "Synaptics SL261X SOC's clk drivers"
-	depends on SYNA_CLK_BASE
+	depends on SYNA_CLK_BASE && SL_SYSMGR_CLK
 	default n
 	help
 	  Build the clk drivers for Synaptics SL261X SOCs.
