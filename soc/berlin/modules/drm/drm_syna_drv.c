@@ -146,7 +146,9 @@ static int syna_early_load(struct drm_device *dev)
 
 	/* dsi panel init */
 	syna_panel_lcdc_init(pdev);
-	syna_panel_dsi_init(pdev);
+	err = syna_panel_dsi_init(pdev);
+	if (err)
+		goto err_panel_cleanup;
 
 	/* Initialise the Device specific init*/
 	err = syna_vpp_dev_init(dev);
@@ -198,6 +200,9 @@ err_thread_cleanup:
 	}
 err_modeset_late_cleanup:
 	syna_modeset_late_cleanup(dev_priv);
+err_panel_cleanup:
+	syna_panel_lcdc_deinit();
+	syna_gem_deinit(dev);
 err_gem_cleanup:
 	kfree(dev_priv);
 	return err;

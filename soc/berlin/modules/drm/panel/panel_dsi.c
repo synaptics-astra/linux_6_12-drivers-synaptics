@@ -32,6 +32,11 @@
 #include "avio_core.h"
 #include "drm_syna_drv.h"
 
+/*
+ * Panel takes some time to register, we will defer only 2 times for the sub-panel registration
+ */
+#define SUB_PANEL_MAX_DEFER_COUNT 2
+
 typedef struct panel_timing_info_t {
 	unsigned int hact;
 	unsigned int hfp;
@@ -64,6 +69,7 @@ typedef struct panel_desc_t {
 static struct display_timing synaPanelTimings;
 static SYNA_PANEL_DESC  	synaPanelInfo;
 static 	struct drm_panel *dsi_panel;
+static int sub_panel_defer_count = 0;
 
 void syna_panel_dsi_set_mipi_info(void *pMipiDsiInfo);
 
@@ -97,7 +103,7 @@ static int syna_panel_dsi_enable(struct drm_panel *panel)
 	if (!display_info.u.status)
 		syna_dsi_panel_send_cmd(synaPanelInfo.cmdsize, synaPanelInfo.cmd);
 
-	if (synaPanelInfo.sub_panel)
+	if (!IS_ERR_OR_NULL(synaPanelInfo.sub_panel))
 		drm_panel_enable(synaPanelInfo.sub_panel);
 
 	return 0;
@@ -116,7 +122,7 @@ static int syna_panel_dsi_disable(struct drm_panel *panel)
 			pr_info("failed to disable supply: %d\n", err);
 	}
 
-	if (synaPanelInfo.sub_panel)
+	if (!IS_ERR_OR_NULL(synaPanelInfo.sub_panel))
 		drm_panel_disable(synaPanelInfo.sub_panel);
 
 	return 0;
@@ -146,7 +152,7 @@ static int syna_panel_dsi_prepare(struct drm_panel *panel)
 
 	syna_bridge_modeset(&synaPanelTimings);
 
-	if (synaPanelInfo.sub_panel)
+	if (!IS_ERR_OR_NULL(synaPanelInfo.sub_panel))
 		drm_panel_prepare(synaPanelInfo.sub_panel);
 
 	return 0;
@@ -170,7 +176,7 @@ static int syna_panel_dsi_unprepare(struct drm_panel *panel)
 			}
 		}
 	}
-	if (synaPanelInfo.sub_panel)
+	if (!IS_ERR_OR_NULL(synaPanelInfo.sub_panel))
 		drm_panel_unprepare(synaPanelInfo.sub_panel);
 
 	return 0;
@@ -218,21 +224,110 @@ static const struct drm_panel_funcs syna_panel_dsi_funcs = {
 int syna_panel_dsi_init(struct platform_device *pdev)
 {
 	int err = 0;
+	long err_code;
+	struct drm_panel *p = NULL;
 	struct device *mipi_dev;
-	struct device_node *np;
+	struct device_node *np, *sub_np;
+	struct regulator *supply;
+	struct gpio_desc *mipibl;
+	struct backlight_device *backlight;
 
 	mipi_dev = devm_kmalloc(&pdev->dev, sizeof(struct device), GFP_KERNEL);
 	if (!mipi_dev)
 		return -ENOMEM;
 
 	mipi_dev->of_node = of_find_compatible_node(NULL, NULL, "syna,drm-dsi");
-
 	if (!mipi_dev->of_node)
 		return -ENODEV;
 
 	dsi_panel = devm_kzalloc(&pdev->dev, sizeof(struct drm_panel), GFP_KERNEL);
 	if (!dsi_panel)
 		return -ENOMEM;
+
+	/* Find & obtain the handle to the compatible panel specified in drm/dsi-panel node */
+	of_property_read_string(mipi_dev->of_node, "compatible_panel", &synaPanelInfo.compatible_panel);
+
+	if (synaPanelInfo.compatible_panel) {
+		sub_np = of_find_compatible_node(NULL, NULL, synaPanelInfo.compatible_panel);
+		if (!sub_np || !of_device_is_available(sub_np)) {
+			pr_info("syna_drm: sub-panel not in DT or disabled, proceeding without it\n");
+			p = NULL;
+			sub_panel_defer_count = 0;  /* Reset counter when device is absent */
+		} else {
+			p = of_drm_find_panel(sub_np);
+			if (IS_ERR(p)) {
+				err_code = PTR_ERR(p);
+				if (err_code == -EPROBE_DEFER) {
+					if (sub_panel_defer_count < SUB_PANEL_MAX_DEFER_COUNT) {
+						sub_panel_defer_count++;
+						pr_info("syna_drm: sub-panel not ready (defer attempt %d/%d), deferring\n",
+							sub_panel_defer_count, SUB_PANEL_MAX_DEFER_COUNT);
+						of_node_put(sub_np);
+						of_node_put(mipi_dev->of_node);
+						return -EPROBE_DEFER;
+					} else {
+						pr_warn("syna_drm: sub-panel defer limit reached, proceeding without it\n");
+						p = NULL;
+					}
+				} else {
+					pr_warn("syna_drm: sub-panel lookup failed (err=%ld), proceeding without it\n", err_code);
+					p = NULL;
+				}
+			} else {
+				/* Panel found successfully, reset counter for next boot */
+				sub_panel_defer_count = 0;
+			}
+		}
+	}
+
+	err = avio_module_mipirst_get_gpio_handle(&pdev->dev,
+							of_fwnode_handle(mipi_dev->of_node),
+							GPIOD_ASIS);
+	if (err == -EPROBE_DEFER)
+		return err;
+
+	mipibl = devm_fwnode_gpiod_get_index(&pdev->dev,
+				of_fwnode_handle(mipi_dev->of_node),
+				"mipibl", 0,
+				GPIOD_ASIS, "mipibl");
+
+	if (IS_ERR(mipibl)) {
+		/* Ignore the error other than probe defer */
+		if (PTR_ERR(mipibl) == -EPROBE_DEFER)
+			return -EPROBE_DEFER;
+		else
+			mipibl = NULL;
+	}
+
+	np = of_parse_phandle(mipi_dev->of_node, "backlight", 0);
+	if (np) {
+		backlight = of_find_backlight_by_node(np);
+		of_node_put(np);
+		if (IS_ERR(backlight)) {
+			if (PTR_ERR(backlight) == -EPROBE_DEFER) {
+				pr_info("External Backlight Device not ready (err=%ld), deferring\n", PTR_ERR(backlight));
+				return -EPROBE_DEFER;
+			}
+			else {
+				backlight = NULL;
+				pr_info("No external Backlight Device found, proceeding without it\n");
+			}
+		}
+	} else {
+		pr_info("No external Backlight Device\n");
+		backlight = NULL;
+	}
+
+	/* If there is no regulator device registered, the framework will return
+	 * -EPROBE_DEFER, which would lead to continuous probe deferral. To avoid
+	 * infinite defer loops, do not propagate defer. Assume module load order
+	 * is handled during boot.
+	 */
+	supply = devm_regulator_get_optional(&pdev->dev, "power");
+	if (IS_ERR(supply)) {
+		pr_info("External Regulator not available (err=%ld), continuing without it\n", PTR_ERR(supply));
+		supply = NULL;
+	}
 
 	of_property_read_u32(mipi_dev->of_node, "ACTIVE_WIDTH", &synaPanelInfo.panel_timing.hact);
 	of_property_read_u32(mipi_dev->of_node, "HFP", &synaPanelInfo.panel_timing.hfp);
@@ -246,7 +341,6 @@ int syna_panel_dsi_init(struct platform_device *pdev)
 
 	of_property_read_u32(mipi_dev->of_node, "bits_per_pixel", &synaPanelInfo.bpp);
 	of_property_read_u32(mipi_dev->of_node, "busformat", &synaPanelInfo.outformat);
-	of_property_read_string(mipi_dev->of_node, "compatible_panel", &synaPanelInfo.compatible_panel);
 
 	synaPanelInfo.cmdsize = of_property_count_u8_elems(mipi_dev->of_node, "command");
 
@@ -291,64 +385,32 @@ int syna_panel_dsi_init(struct platform_device *pdev)
 	synaPanelTimings.pixelclock.min = synaPanelTimings.pixelclock.max = \
 					synaPanelTimings.pixelclock.typ = synaPanelInfo.panel_timing.pixelclock;
 
-	synaPanelInfo.supply = devm_regulator_get_optional(&pdev->dev, "power");
-	if (IS_ERR(synaPanelInfo.supply)) {
-		if (PTR_ERR(synaPanelInfo.supply) == -EPROBE_DEFER)
-			return -EPROBE_DEFER;
-		else {
-			pr_info("External Regulator not available \n");
-			synaPanelInfo.supply = NULL;
-		}
-	}
-
-	err = avio_module_mipirst_get_gpio_handle(&pdev->dev,
-									of_fwnode_handle(mipi_dev->of_node),
-									GPIOD_ASIS);
-	if (err == -EPROBE_DEFER)
-		return err;
-
-	synaPanelInfo.mipibl = devm_fwnode_gpiod_get_index(&pdev->dev,
-				of_fwnode_handle(mipi_dev->of_node),
-				"mipibl", 0,
-				GPIOD_ASIS, "mipibl");
-
-	if (IS_ERR(synaPanelInfo.mipibl)) {
-		/* Ignore the error other than probe defer */
-		if (PTR_ERR(synaPanelInfo.mipibl) == -EPROBE_DEFER)
-			return -EPROBE_DEFER;
-		else
-			synaPanelInfo.mipibl = NULL;
-	}
-
 	of_node_put(mipi_dev->of_node);
 
 	avio_module_mipirst_set_gpio_val(0);
-	gpiod_direction_output(synaPanelInfo.mipibl, 1);
+	if (mipibl)
+		gpiod_direction_output(mipibl, 1);
 
 	drm_panel_init(dsi_panel, mipi_dev, &syna_panel_dsi_funcs,
 					DRM_MODE_CONNECTOR_DSI);
 
-	np = of_parse_phandle(mipi_dev->of_node, "backlight", 0);
-	if (np) {
-		dsi_panel->backlight = of_find_backlight_by_node(np);
-		of_node_put(np);
-		if (IS_ERR(dsi_panel->backlight)) {
-			if (PTR_ERR(dsi_panel->backlight) == -EPROBE_DEFER)
-				return -EPROBE_DEFER;
-		}
-	} else {
-		pr_info("No external Backlight Device\n");
-		dsi_panel->backlight = NULL;
-	}
-
 	drm_panel_add(dsi_panel);
 
 	err = syna_bridge_init(pdev);
-	if (err)
+	if (err) {
 		pr_warn("syna_panel_dsi_init: bridge init failed err=%d\n", err);
+		/* Ignore bridge missing error - as bridge not compulsory */
+		err = 0;
+	}
 
-	if (of_device_is_available(of_find_compatible_node(NULL, NULL, synaPanelInfo.compatible_panel)))
-		synaPanelInfo.sub_panel = of_drm_find_panel(of_find_compatible_node(NULL, NULL, synaPanelInfo.compatible_panel));
+
+	synaPanelInfo.sub_panel = p;
+
+	synaPanelInfo.supply = supply;
+
+	synaPanelInfo.mipibl = mipibl;
+
+	dsi_panel->backlight = backlight;
 
 	return err;
 }
