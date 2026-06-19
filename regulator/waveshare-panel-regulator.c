@@ -196,6 +196,19 @@ static int waveshare_panel_i2c_read(struct i2c_client *client, u8 reg,
 	return 0;
 }
 
+static int waveshare_panel_i2c_check(struct i2c_client *client, u8 reg,
+				    unsigned int *buf)
+{
+	int ret;
+
+	ret = waveshare_panel_i2c_read(client, reg, buf);
+	if (ret) {
+		dev_info(&client->dev, "Panel regulator not ready, deferring probe\n");
+		ret = -EPROBE_DEFER;
+	}
+	return ret;
+}
+
 /*
  * I2C driver interface functions
  */
@@ -224,6 +237,9 @@ static int waveshare_panel_i2c_probe(struct i2c_client *i2c)
 			ret);
 		goto error;
 	}
+
+	if ((ret = waveshare_panel_i2c_check(i2c, REG_ID, &data)))
+		goto error;
 
 	ret = waveshare_panel_i2c_read(i2c, REG_ID, &data);
 	if (ret == 0)
