@@ -611,10 +611,15 @@ struct kbase_mem_pool_group_config {
  * @core_mask: Shader core mask
  */
 struct kbase_devfreq_opp {
-	u64 opp_freq;
+	unsigned long opp_freq;
 	u64 core_mask;
-	u64 real_freqs[BASE_MAX_NR_CLOCKS_REGULATORS];
-	u32 opp_volts[BASE_MAX_NR_CLOCKS_REGULATORS];
+	unsigned long real_freqs[BASE_MAX_NR_CLOCKS_REGULATORS];
+
+#if IS_ENABLED(CONFIG_REGULATOR)
+	unsigned long opp_volts[BASE_MAX_NR_CLOCKS_REGULATORS];
+	unsigned long opp_volts_min[BASE_MAX_NR_CLOCKS_REGULATORS];
+	unsigned long opp_volts_max[BASE_MAX_NR_CLOCKS_REGULATORS];
+#endif
 };
 
 /* MMU mode flags */

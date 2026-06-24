@@ -65,5 +65,5 @@ void kbase_devfreq_enqueue_work(struct kbase_device *kbdev, enum kbase_devfreq_w
  * The voltages returned are in micro Volts (uV).
  */
 void kbase_devfreq_opp_translate(struct kbase_device *kbdev, unsigned long freq, u64 *core_mask,
-				 unsigned long *freqs, unsigned long *volts);
+				 unsigned long *freqs, unsigned long *volts, unsigned long *volts_min, unsigned long *volts_max);
 #endif /* _BASE_DEVFREQ_H_ */

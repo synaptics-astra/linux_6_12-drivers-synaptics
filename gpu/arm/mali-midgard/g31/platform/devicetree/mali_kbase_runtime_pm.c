@@ -33,16 +33,6 @@
 static void enable_gpu_power_control(struct kbase_device *kbdev)
 {
 	unsigned int i;
-
-#if defined(CONFIG_REGULATOR)
-	for (i = 0; i < kbdev->nr_regulators; i++) {
-		if (WARN_ON(kbdev->regulators[i] == NULL))
-			;
-		else if (!regulator_is_enabled(kbdev->regulators[i]))
-			WARN_ON(regulator_enable(kbdev->regulators[i]));
-	}
-#endif
-
 	for (i = 0; i < kbdev->nr_clocks; i++) {
 		if (WARN_ON(kbdev->clocks[i] == NULL))
 			;
@@ -63,16 +53,6 @@ static void disable_gpu_power_control(struct kbase_device *kbdev)
 			WARN_ON(__clk_is_enabled(kbdev->clocks[i]));
 		}
 	}
-
-#if defined(CONFIG_REGULATOR)
-	for (i = 0; i < kbdev->nr_regulators; i++) {
-		if (WARN_ON(kbdev->regulators[i] == NULL))
-			;
-		else if (regulator_is_enabled(kbdev->regulators[i]))
-			WARN_ON(regulator_disable(kbdev->regulators[i]));
-	}
-#endif
-
 }
 
 static int pm_callback_power_on(struct kbase_device *kbdev)

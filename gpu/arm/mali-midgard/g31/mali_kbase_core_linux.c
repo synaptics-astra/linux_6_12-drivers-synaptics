@@ -4549,8 +4549,8 @@ int power_control_init(struct kbase_device *kbdev)
 	int err = 0;
 	unsigned int i;
 #if defined(CONFIG_REGULATOR)
-	static const char *const regulator_names[] = { "mali", "shadercores" };
-	BUILD_BUG_ON(ARRAY_SIZE(regulator_names) < BASE_MAX_NR_CLOCKS_REGULATORS);
+	static const char *const regulator_names[] = { "mali", NULL};
+	const unsigned int nr_regulator_names = ARRAY_SIZE(regulator_names) - 1;
 #endif /* CONFIG_REGULATOR */
 
 	if (!kbdev)
@@ -4566,7 +4566,7 @@ int power_control_init(struct kbase_device *kbdev)
 	 * Any other error is ignored and the driver will continue
 	 * operating with a partial initialization of regulators.
 	 */
-	for (i = 0; i < BASE_MAX_NR_CLOCKS_REGULATORS; i++) {
+	for (i = 0; i < nr_regulator_names; i++) {
 		kbdev->regulators[i] = regulator_get_optional(kbdev->dev, regulator_names[i]);
 		if (IS_ERR(kbdev->regulators[i])) {
 			err = PTR_ERR(kbdev->regulators[i]);

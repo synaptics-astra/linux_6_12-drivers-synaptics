@@ -74,7 +74,7 @@ static unsigned long get_voltage(struct kbase_device *kbdev, unsigned long freq)
 }
 
 void kbase_devfreq_opp_translate(struct kbase_device *kbdev, unsigned long freq, u64 *core_mask,
-				 unsigned long *freqs, unsigned long *volts)
+				 unsigned long *freqs, unsigned long *volts, unsigned long *volts_min, unsigned long *volts_max)
 {
 	unsigned int i;
 
@@ -86,6 +86,8 @@ void kbase_devfreq_opp_translate(struct kbase_device *kbdev, unsigned long freq,
 			for (j = 0; j < kbdev->nr_clocks; j++) {
 				freqs[j] = kbdev->devfreq_table[i].real_freqs[j];
 				volts[j] = kbdev->devfreq_table[i].opp_volts[j];
+				volts_min[j] = kbdev->devfreq_table[i].opp_volts_min[j];
+				volts_max[j] = kbdev->devfreq_table[i].opp_volts_max[j];
 			}
 
 			break;
@@ -103,6 +105,8 @@ void kbase_devfreq_opp_translate(struct kbase_device *kbdev, unsigned long freq,
 		for (i = 0; i < kbdev->nr_clocks; i++) {
 			freqs[i] = freq;
 			volts[i] = voltage;
+			volts_min[i] = voltage;
+			volts_max[i] = voltage;
 		}
 	}
 }
@@ -116,6 +120,8 @@ static int kbase_devfreq_target(struct device *dev, unsigned long *target_freq, 
 #if IS_ENABLED(CONFIG_REGULATOR)
 	unsigned long original_freqs[BASE_MAX_NR_CLOCKS_REGULATORS] = { 0 };
 #endif
+	unsigned long volts_min[BASE_MAX_NR_CLOCKS_REGULATORS] = { 0 };
+	unsigned long volts_max[BASE_MAX_NR_CLOCKS_REGULATORS] = { 0 };
 	unsigned long volts[BASE_MAX_NR_CLOCKS_REGULATORS] = { 0 };
 	unsigned int i;
 	int err;
@@ -145,7 +151,7 @@ static int kbase_devfreq_target(struct device *dev, unsigned long *target_freq, 
 		return 0;
 	}
 
-	kbase_devfreq_opp_translate(kbdev, nominal_freq, &core_mask, freqs, volts);
+	kbase_devfreq_opp_translate(kbdev, nominal_freq, &core_mask, freqs, volts, volts_min, volts_max);
 
 #if IS_ENABLED(CONFIG_REGULATOR)
 	/* Regulators and clocks work in pairs: every clock has a regulator,
@@ -165,7 +171,7 @@ static int kbase_devfreq_target(struct device *dev, unsigned long *target_freq, 
 	for (i = 0; i < kbdev->nr_clocks; i++) {
 		if (kbdev->regulators[i] && kbdev->current_voltages[i] != volts[i] &&
 		    kbdev->current_freqs[i] < freqs[i]) {
-			err = regulator_set_voltage(kbdev->regulators[i], volts[i], volts[i]);
+			err = regulator_set_voltage(kbdev->regulators[i], volts_min[i], volts_max[i]);
 			if (!err) {
 				kbdev->current_voltages[i] = volts[i];
 			} else {
@@ -199,7 +205,7 @@ static int kbase_devfreq_target(struct device *dev, unsigned long *target_freq, 
 	for (i = 0; i < kbdev->nr_clocks; i++) {
 		if (kbdev->regulators[i] && kbdev->current_voltages[i] != volts[i] &&
 		    original_freqs[i] > freqs[i]) {
-			err = regulator_set_voltage(kbdev->regulators[i], volts[i], volts[i]);
+			err = regulator_set_voltage(kbdev->regulators[i], volts_min[i], volts_max[i]);
 			if (!err) {
 				kbdev->current_voltages[i] = volts[i];
 			} else {
@@ -405,7 +411,8 @@ static int kbase_devfreq_init_core_mask_table(struct kbase_device *kbdev)
 		u64 core_mask, opp_freq, real_freqs[BASE_MAX_NR_CLOCKS_REGULATORS];
 		int err;
 #if IS_ENABLED(CONFIG_REGULATOR)
-		u32 opp_volts[BASE_MAX_NR_CLOCKS_REGULATORS];
+		u32 opp_volts[BASE_MAX_NR_CLOCKS_REGULATORS * 3];
+		int nr_uv;
 #endif
 
 		/* Read suspend clock from opp table */
@@ -430,11 +437,26 @@ static int kbase_devfreq_init_core_mask_table(struct kbase_device *kbdev)
 			continue;
 		}
 #if IS_ENABLED(CONFIG_REGULATOR)
-		err = of_property_read_u32_array(node, "opp-microvolt", opp_volts,
-						 kbdev->nr_regulators);
+		nr_uv = of_property_count_u32_elems(node, "opp-microvolt");
+		if (nr_uv < 0) {
+			dev_warn(kbdev->dev,
+				"Failed to count opp-microvolt property with error %d\n",
+				nr_uv);
+			continue;
+		}
+
+		if (nr_uv != kbdev->nr_regulators &&
+			nr_uv != kbdev->nr_regulators * 3) {
+			dev_warn(kbdev->dev,
+				"Invalid opp-microvolt entries %d for %u regulators\n",
+				nr_uv, kbdev->nr_regulators);
+			continue;
+		}
+
+		err = of_property_read_u32_array(node, "opp-microvolt", opp_volts, nr_uv);
 		if (err < 0) {
-			dev_warn(kbdev->dev, "Failed to read opp-microvolt property with error %d",
-				 err);
+			dev_warn(kbdev->dev, "Failed to read opp-microvolt property with error %d\n",
+				err);
 			continue;
 		}
 #endif
@@ -487,8 +509,17 @@ static int kbase_devfreq_init_core_mask_table(struct kbase_device *kbdev)
 		if (kbdev->nr_regulators > 0) {
 			unsigned int j;
 
-			for (j = 0; j < kbdev->nr_regulators; j++)
-				kbdev->devfreq_table[i].opp_volts[j] = opp_volts[j];
+			for (j = 0; j < kbdev->nr_regulators; j++) {
+				if (nr_uv == kbdev->nr_regulators) {
+					kbdev->devfreq_table[i].opp_volts[j] = opp_volts[j];
+					kbdev->devfreq_table[i].opp_volts_min[j] = opp_volts[j];
+					kbdev->devfreq_table[i].opp_volts_max[j] = opp_volts[j];
+				} else {
+					kbdev->devfreq_table[i].opp_volts[j] = opp_volts[j * 3];
+					kbdev->devfreq_table[i].opp_volts_min[j] = opp_volts[j * 3 + 1];
+					kbdev->devfreq_table[i].opp_volts_max[j] = opp_volts[j * 3 + 2];
+				}
+			}
 		}
 #endif
 
