@@ -50,9 +50,26 @@ static struct snd_kcontrol_new spdifi_ctrls[] = {
 	//TODO: add dai control
 };
 
+static u32 spdifi_get_sample_rate(void *data)
+{
+	struct spdifi_priv *spdifi = data;
+	int fs;
+
+	if (!spdifi || !spdifi->aio_handle)
+		return 0;
+
+	fs = aio_spdifi_get_fs(spdifi->aio_handle);
+
+	return fs > 0 ? (u32)fs : 0;
+}
+
 static int spdifi_startup(struct snd_pcm_substream *ss,
 			      struct snd_soc_dai *dai)
 {
+	struct spdifi_priv *spdifi = snd_soc_dai_get_drvdata(dai);
+
+	berlin_pcm_set_spdif_sample_rate_provider(ss, spdifi_get_sample_rate,
+						  spdifi);
 	snd_printd("%s: start 0x%p 0x%p\n", __func__, ss, dai);
 
 	return 0;
@@ -61,6 +78,7 @@ static int spdifi_startup(struct snd_pcm_substream *ss,
 static void spdifi_shutdown(struct snd_pcm_substream *ss,
 				  struct snd_soc_dai *dai)
 {
+	berlin_pcm_set_spdif_sample_rate_provider(ss, NULL, NULL);
 	snd_printd("%s: end 0x%p 0x%p\n", __func__, ss, dai);
 }
 

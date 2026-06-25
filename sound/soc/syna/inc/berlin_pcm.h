@@ -137,6 +137,8 @@ void berlin_pcm_set_ch_mode(struct snd_pcm_substream *ss,
 	bool enable_mic_mute, bool interleaved_mode,
 	bool dummy_data, bool multi_lanes, u32 channel_map,
 	bool ch_shift_check, void * aio_handle);
+void berlin_pcm_set_spdif_sample_rate_provider(struct snd_pcm_substream *ss,
+				u32 (*get_fs_fn)(void *data), void *data);
 void berlin_pcm_set_volume_db(struct snd_pcm_substream *ss, u32 mode, int volume_db);
 void berlin_pcm_set_mic_mute_state(struct snd_pcm_substream *ss, int mute);
 int berlin_pcm_aip_event_callback_newframe(struct snd_pcm_substream *ss);

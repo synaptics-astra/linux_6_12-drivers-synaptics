@@ -150,6 +150,8 @@ struct berlin_capture {
 	u8 spdif_channel_status[24];			/* 192 bits = 24 bytes for full block */
 	u8 spdif_channel_status_pending[24];	/* working copy, ISR-context only */
 	u8 spdif_channel_status_completed[24];  /* snapshot of last completed block */
+	u32 (*spdif_get_sample_rate)(void *data);
+	void *spdif_get_sample_rate_data;
 	u32 spdif_bit_index;					/* Bit position in channel_status array */
 	bool spdif_block_synced;				/* Track if we're synchronized to a valid B preamble */
 	bool spdif_csb_ready;					/* completed CSB block with changes */
@@ -229,19 +231,31 @@ int berlin_capture_spdif_sample_rate_get(struct snd_kcontrol *kcontrol,
 				       struct snd_ctl_elem_value *ucontrol)
 {
 	struct berlin_capture *bc = (struct berlin_capture *)kcontrol->private_data;
-	int fs = 0;
+	ucontrol->value.integer.value[0] = 0;
 
 	if (!bc) {
-		ucontrol->value.integer.value[0] = 0;
 		return 0;
 	}
 
-	if (bc->mode == SPDIFI_MODE && bc->aio_handle)
-		fs = aio_spdifi_get_fs(bc->aio_handle);
-
-	ucontrol->value.integer.value[0] = (fs > 0) ? fs : 0;
+	if (bc->mode == SPDIFI_MODE && bc->spdif_get_sample_rate) {
+		ucontrol->value.integer.value[0] = bc->spdif_get_sample_rate(bc->spdif_get_sample_rate_data);
+	}
 
 	return 0;
+}
+
+void berlin_capture_set_spdif_sample_rate_provider(
+				struct snd_pcm_substream *substream,
+				u32 (*get_fs_fn)(void *data), void *data)
+{
+	struct snd_pcm_runtime *runtime = substream->runtime;
+	struct berlin_capture *bc = runtime->private_data;
+
+	if (!bc)
+		return;
+
+	bc->spdif_get_sample_rate = get_fs_fn;
+	bc->spdif_get_sample_rate_data = data;
 }
 
 int berlin_capture_spdif_control_status_buffer_get(struct snd_kcontrol *kcontrol,
@@ -1745,6 +1759,8 @@ int berlin_capture_open(struct snd_pcm_substream *ss)
 		return -EINVAL;
 
 	bc->aio_handle = NULL;
+	bc->spdif_get_sample_rate = NULL;
+	bc->spdif_get_sample_rate_data = NULL;
 	bc->dma_pending = false;
 	bc->capturing = false;
 	bc->pages_allocated = false;

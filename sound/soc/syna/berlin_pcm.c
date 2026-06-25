@@ -288,6 +288,14 @@ void berlin_pcm_set_ch_mode(struct snd_pcm_substream *ss,
 }
 EXPORT_SYMBOL(berlin_pcm_set_ch_mode);
 
+void berlin_pcm_set_spdif_sample_rate_provider(struct snd_pcm_substream *ss,
+				u32 (*get_fs_fn)(void *data), void *data)
+{
+	if (ss->stream == SNDRV_PCM_STREAM_CAPTURE)
+		berlin_capture_set_spdif_sample_rate_provider(ss, get_fs_fn, data);
+}
+EXPORT_SYMBOL(berlin_pcm_set_spdif_sample_rate_provider);
+
 void berlin_pcm_set_volume_db(struct snd_pcm_substream *ss, u32 mode, int volume_db)
 {
 	if (ss->stream == SNDRV_PCM_STREAM_PLAYBACK)

@@ -15,6 +15,9 @@ void berlin_capture_set_ch_mode(struct snd_pcm_substream *substream,
 				bool enable_mic_mute, bool interleaved_mode,
 				bool dummy_data, bool multi_lanes, u32 channel_map,
 				bool ch_shift_check, void * aio_handle);
+void berlin_capture_set_spdif_sample_rate_provider(
+				struct snd_pcm_substream *substream,
+				u32 (*get_fs_fn)(void *data), void *data);
 int berlin_capture_hw_free(struct snd_pcm_substream *substream);
 int berlin_capture_hw_params(struct snd_pcm_substream *substream,
 			     struct snd_pcm_hw_params *params);
