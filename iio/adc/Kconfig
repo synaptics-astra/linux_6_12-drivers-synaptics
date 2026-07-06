@@ -1,0 +1,8 @@
+menu "Analog to digital converters"
+
+config SL261X_ADC
+       tristate "Synaptics SL261X ADC"
+       help
+         Say yes here to build support for Synaptics SL261X ADC
+
+endmenu

@@ -1,0 +1,14 @@
+menuconfig SYNAPTICS_IIO
+  bool "Synaptics IIO driver support"
+  default n
+  help
+    Synaptics IIO driver support
+
+
+if SYNAPTICS_IIO
+if IIO
+
+source "drivers/synaptics/iio/adc/Kconfig"
+
+endif # IIO
+endif

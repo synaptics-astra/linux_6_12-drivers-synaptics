@@ -35,6 +35,8 @@ source "drivers/synaptics/devfreq/Kconfig"
 
 source "drivers/synaptics/dma-buf/Kconfig"
 
+source "drivers/synaptics/iio/Kconfig"
+
 source "drivers/synaptics/irqchip/Kconfig"
 
 source "drivers/synaptics/input/Kconfig"

@@ -19,6 +19,8 @@ obj-$(CONFIG_SYNAPTICS_PHY)			+= phy/
 
 obj-$(CONFIG_SYNAPTICS_HWMON)		+= hwmon/
 
+obj-$(CONFIG_SYNAPTICS_IIO)			+= iio/
+
 obj-$(CONFIG_SYNAPTICS_I2C)			+= i2c/
 
 obj-$(CONFIG_SYNAPTICS_SOC)			+= soc/
