@@ -2364,20 +2364,35 @@ wl_cfgscan_handle_scanbusy(struct bcm_cfg80211 *cfg, struct net_device *ndev, s3
 	return scanbusy_err;
 }
 
+static bool
+is_p2p_ssid_present(struct cfg80211_scan_request *request)
+{
+	struct cfg80211_ssid *ssids;
+	int i;
+
+	ssids = request->ssids;
+	for (i = 0; i < request->n_ssids; i++) {
+			if (ssids[i].ssid_len &&
+				IS_P2P_SSID(ssids[i].ssid, ssids[i].ssid_len)) {
+				/* P2P Scan */
+				return TRUE;
+			}
+	}
+	return FALSE;
+}
+
 s32
 __wl_cfg80211_scan(struct wiphy *wiphy, struct net_device *ndev,
 	struct cfg80211_scan_request *request,
 	struct cfg80211_ssid *this_ssid)
 {
 	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
-	struct cfg80211_ssid *ssids;
-	bool p2p_ssid;
+	bool p2p_ssid = FALSE;
 #ifdef WL11U
 	bcm_tlv_t *interworking_ie;
 #endif
 	s32 err = 0;
 	s32 bssidx = -1;
-	s32 i;
 	bool escan_req_failed = false;
 	s32 scanbusy_err = 0;
 
@@ -2466,22 +2481,12 @@ __wl_cfg80211_scan(struct wiphy *wiphy, struct net_device *ndev,
 #endif
 
 	if (request) {		/* scan bss */
-		ssids = request->ssids;
-		p2p_ssid = false;
-		for (i = 0; i < request->n_ssids; i++) {
-			if (ssids[i].ssid_len &&
-				IS_P2P_SSID(ssids[i].ssid, ssids[i].ssid_len)) {
-				/* P2P Scan */
-#ifdef WL_BLOCK_P2P_SCAN_ON_STA
-				if (!(IS_P2P_IFACE(request->wdev))) {
-					/* P2P scan on non-p2p iface. Fail scan */
-					WL_ERR(("p2p_search on non p2p iface\n"));
-					goto scan_out;
-				}
-#endif /* WL_BLOCK_P2P_SCAN_ON_STA */
-				p2p_ssid = true;
-				break;
-			}
+		p2p_ssid = is_p2p_ssid_present(request);
+		if (p2p_ssid && !(IS_P2P_IFACE(request->wdev))) {
+			/* P2P SSID in legacy scan */
+			WL_DBG(("p2p_search on non p2p iface %d\n",
+				request->wdev->iftype));
+			p2p_ssid = FALSE;
 		}
 		if (p2p_ssid) {
 			if (cfg->p2p_supported) {
@@ -2563,8 +2568,6 @@ __wl_cfg80211_scan(struct wiphy *wiphy, struct net_device *ndev,
 
 			}
 		}
-	} else {		/* scan in ibss */
-		ssids = this_ssid;
 	}
 
 	WL_TRACE_HW4(("START SCAN\n"));
@@ -3798,7 +3801,7 @@ wl_cfg80211_sched_scan_start(struct wiphy *wiphy,
 		/* get channel list. Note PNO uses channels and not chanspecs */
 		wl_cfgscan_populate_scan_channels(cfg,
 				request->channels, request->n_channels,
-				chan_list, &num_channels, false, false);
+				chan_list, &num_channels, true, false);
 	}
 
 	if (DBG_RING_ACTIVE(dhdp, DHD_EVENT_RING_ID)) {
@@ -4742,6 +4745,24 @@ wl_notify_sched_scan_results(struct bcm_cfg80211 *cfg, struct net_device *ndev,
 				channel_req = netinfo_v2->pfnsubnet.channel;
 				band = (channel_req <= CH_MAX_2G_CHANNEL) ? NL80211_BAND_2GHZ
 					: NL80211_BAND_5GHZ;
+				if ((netinfo_v2->timestamp & 0xff) == channel_req) {
+					switch (CHSPEC_BAND(netinfo_v2->timestamp)) {
+						case WL_CHANSPEC_BAND_2G:
+							band = NL80211_BAND_2GHZ;
+							break;
+						case WL_CHANSPEC_BAND_5G:
+							band = NL80211_BAND_5GHZ;
+							break;
+#if defined(CFG80211_6G_SUPPORT)
+						case WL_CHANSPEC_BAND_6G:
+							band = NL80211_BAND_6GHZ;
+							break;
+#endif /* CFG80211_6G_SUPPORT */
+					}
+				}
+				WL_ERR(("%s: TS %08x, CR %08x, ref:%d, %d\n", __func__,
+						netinfo_v2->timestamp, channel_req,
+						NL80211_BAND_2GHZ, NL80211_BAND_5GHZ));
 				channel[i].center_freq =
 					ieee80211_channel_to_frequency(channel_req, band);
 				channel[i].band = band;

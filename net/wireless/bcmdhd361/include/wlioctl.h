@@ -7418,7 +7418,7 @@ typedef struct wl_pfn_significant_bssid {
 typedef struct wl_pfn_cfg {
 	uint32	reporttype;
 	int32	channel_num;
-	uint16	channel_list[WL_NUMCHANNELS];
+	uint16	channel_list[64];
 	uint32	flags;
 } wl_pfn_cfg_t;
 

@@ -339,6 +339,14 @@ static void dhd_blk_tsfl_handler(struct work_struct * work);
 #include <wldev_common.h>
 #endif /* DHD_WFB */
 
+#ifdef DHD_RELOAD_SDIO
+#include <linux/gpio.h>
+#include <linux/device/driver.h>
+#include <linux/platform_device.h>
+#include <linux/of.h>
+#include <linux/of_gpio.h>
+#endif /* DHD_RELOAD_SDIO */
+
 #ifdef WL_MON_OWN_PKT
 static int dhd_get_monitor_data(dhd_pub_t *dhdp, void *pktbuf,
 		struct sk_buff *skb, void *pktdata, uint pktlen);
@@ -1418,6 +1426,10 @@ static int dhd_wl_host_event(dhd_info_t *dhd, int ifidx, void *pktdata, uint16 p
 void dhd_set_wowl_active(bool value);
 #endif
 
+#if defined(DHD_PM_PKT_FILTER_SUPPORT)
+void dhd_pm_enable_pktfilter(bool value);
+#endif /* DHD_PM_PKT_FILTER_SUPPORT */
+
 #if defined(CONFIG_PM_SLEEP)
 static int dhd_pm_callback(struct notifier_block *nfb, unsigned long action, void *ignored)
 {
@@ -1431,17 +1443,23 @@ static int dhd_pm_callback(struct notifier_block *nfb, unsigned long action, voi
 	switch (action) {
 	case PM_HIBERNATION_PREPARE:
 	case PM_SUSPEND_PREPARE:
+#if defined(DHD_PM_PKT_FILTER_SUPPORT)
+		dhd_pm_enable_pktfilter(TRUE);
+#endif /* DHD_PM_PKT_FILTER_SUPPORT */
 #ifdef DHD_WOWL_IN_SUSPEND_SDIO
-	dhd_set_wowl_active(TRUE);
-	msleep(1000);
+		dhd_set_wowl_active(TRUE);
+		msleep(1000);
 #endif /* DHD_WOWL_IN_SUSPEND_SDIO */
 		suspend = TRUE;
 		break;
 
 	case PM_POST_HIBERNATION:
 	case PM_POST_SUSPEND:
+#if defined(DHD_PM_PKT_FILTER_SUPPORT)
+		dhd_pm_enable_pktfilter(FALSE);
+#endif /* DHD_PM_PKT_FILTER_SUPPORT */
 #ifdef DHD_WOWL_IN_SUSPEND_SDIO
-	dhd_set_wowl_active(FALSE);
+		dhd_set_wowl_active(FALSE);
 #endif /* DHD_WOWL_IN_SUSPEND_SDIO */
 		suspend = FALSE;
 		break;
@@ -2548,6 +2566,25 @@ dhd_packet_filter_add_remove(dhd_pub_t *dhdp, int add_remove, int num)
 
 	return 0;
 }
+
+#if defined(DHD_PM_PKT_FILTER_SUPPORT)
+void dhd_pm_enable_pktfilter(bool value)
+{
+	dhd_pub_t *dhd = g_dhd_pub;
+
+	if (!dhd || !dhd_support_sta_mode(dhd)) {
+		return;
+	}
+
+	if (value) {
+		dhd_enable_packet_filter(TRUE, dhd);
+	} else {
+		dhd_enable_packet_filter(FALSE, dhd);
+	}
+
+	return;
+}
+#endif /* DHD_PM_PKT_FILTER_SUPPORT */
 #endif /* PKT_FILTER_SUPPORT */
 
 #if defined(DHD_WOWL_IN_SUSPEND) || defined(DHD_WOWL_IN_SUSPEND_SDIO)
@@ -6746,6 +6783,19 @@ dhd_rx_frame(dhd_pub_t *dhdp, int ifidx, void *pktbuf, int numpkt, uint8 chan)
 
 		ASSERT(ifp);
 		skb->dev = ifp->net;
+
+#ifdef BCMSDIO
+#ifdef DHD_WFB
+		/* not like PCIe, data from SDIO FW does not include the dev info
+		 * set here and skip the extra header not used for WFB.
+		 */
+		if ((dhd_monitor_enabled(&dhd->pub, 0)) && dhd->monitor_dev) {
+			skb->dev = dhd->monitor_dev;
+			skb_pull(skb, ETH_HLEN);
+		}
+#endif /* DHD_WFB */
+#endif /* BCMSDIO */
+
 #ifdef DHD_WET
 		/* wet related packet proto manipulation should be done in DHD
 		 * since dongle doesn't have complete payload
@@ -10416,6 +10466,10 @@ dhd_stop(struct net_device *net)
 #ifdef WL_CFG80211
 	if (ifidx == 0) {
 		dhd_if_t *ifp;
+
+#if defined(WL_CFG80211) && defined(OEM_ANDROID)
+		wl_cfg80211_btcoex_stop();
+#endif /* WL_CFG80211 && OEM_ANDROID */
 
 		// early mark 'down' to avoid false hang event
 		DHD_UP_LOCK(&dhd->pub.up_lock, flags);
@@ -19621,6 +19675,11 @@ dhd_load_retry_cnt_get(void)
 	return g_dhd_load_retry_cnt;
 }
 
+#ifdef DHD_RELOAD_SDIO
+extern int sdioh_reprobe_sdhci(void);
+extern int dhd_wlregon_toggle_sequence(void);
+#endif /* DHD_RELOAD_SDIO */
+
 static int
 _dhd_module_init(void)
 {
@@ -19660,6 +19719,11 @@ _dhd_module_init(void)
 	if (nvram_path[0] != '\0') {
 		strlcpy(nv_bak_path, nvram_path, sizeof(nv_bak_path));
 	}
+
+	#ifdef DHD_RELOAD_SDIO
+		dhd_wlregon_toggle_sequence();
+		sdioh_reprobe_sdhci();
+	#endif /* DHD_RELOAD_SDIO */
 
 	do {
 		/* Number of retries attempted is max minus current attempt number */
@@ -25099,7 +25163,12 @@ dhd_mem_dump(void *handle, void *event_info, u8 event)
 		} else	{
 			DHD_ERROR(("%s: FIS not enabled (%d:%d), collect legacy sssr\n",
 				__FUNCTION__, fis_enab, dhdp->sssr_reg_info->rev3.fis_enab));
+#if defined(BCMPCIE)
 			dhdpcie_sssr_dump(dhdp);
+#elif defined(BCMSDIO)
+			dhdsdio_sssr_dump(dhdp);
+#else
+#endif
 		}
 
 		/* Print sssr buffer address for debugging */

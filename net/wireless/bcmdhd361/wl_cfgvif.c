@@ -2375,10 +2375,11 @@ wl_get_mfp_capability(u8 rsn_cap, u32 *wpa_auth, u32 *mfp_val)
 	}
 
 	/* Validate MFP */
-	if ((*wpa_auth == WPA3_AUTH_SAE_PSK) && (mfp != WL_MFP_REQUIRED)) {
+	if ((*wpa_auth == WPA3_AUTH_SAE_PSK ||
+				*wpa_auth == WPA3_AUTH_SAE_EXT_PSK) && (mfp != WL_MFP_REQUIRED)) {
 		WL_ERR(("MFPR should be set for SAE PSK. mfp:%d\n", mfp));
 		return BCME_ERROR;
-	} else if ((*wpa_auth == (WPA3_AUTH_SAE_PSK | WPA2_AUTH_PSK)) &&
+	} else if ((*wpa_auth == (WPA3_AUTH_SAE_EXT_PSK | WPA3_AUTH_SAE_PSK | WPA2_AUTH_PSK)) &&
 		(mfp != WL_MFP_CAPABLE)) {
 		WL_ERR(("mfp(%d) should be set to capable(%d) for SAE transition mode\n",
 				mfp, WL_MFP_CAPABLE));
@@ -2522,6 +2523,9 @@ wl_validate_wpa2ie(struct net_device *dev, const bcm_tlv_t *wpa2ie, s32 bssidx)
 #if defined(WL_SAE) || defined(WL_CLIENT_SAE)
 			case RSN_AKM_SAE_PSK:
 				wpa_auth |= WPA3_AUTH_SAE_PSK;
+				break;
+			case RSN_AKM_SAE_EXT_PSK:
+				wpa_auth |= WPA3_AUTH_SAE_EXT_PSK;
 				break;
 #endif /* WL_SAE || WL_CLIENT_SAE */
 #endif /* MFP */
@@ -2873,6 +2877,9 @@ static u32 wl_get_suite_auth_key_mgmt_type(uint8 type, const wpa_suite_mcast_t *
 
 		case RSN_AKM_SAE_PSK:
 			ret = WPA3_AUTH_SAE_PSK;
+			break;
+		case RSN_AKM_SAE_EXT_PSK:
+			ret = WPA3_AUTH_SAE_EXT_PSK;
 			break;
 #endif /* WL_SAE || WL_CLIENT_SAE */
 #endif /* MFP */

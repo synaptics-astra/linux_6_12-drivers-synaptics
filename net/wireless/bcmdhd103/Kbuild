@@ -888,6 +888,13 @@ DHDCFLAGS += -DSUPPORT_OTA_UPDATE
 ##########################
 DRIVER_TYPE ?= $(CONFIG_BCMDHD)
 
+ifneq ($(CONFIG_BCMDHD_PCIE),y)
+ifeq ($(CONFIG_BCMDHD_WFB),y)
+  DRIVER_TYPE :=
+  $(warning : ** DHD_WFB defined, skip building ko module **)
+endif
+endif
+
 #########################
 # Chip dependent feature
 #########################

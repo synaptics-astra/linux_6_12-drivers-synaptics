@@ -295,6 +295,11 @@ dhd_wifi_init_gpio(void)
 		wlan_host_wake_up = wlan_gpio_host_wake_up;
 	}
 #endif /* BCMSDIO */
+
+#ifdef BCMPCIE
+	wlan_host_wake_up = wlan_gpio_host_wake_up;
+#endif /* BCMPCIE */
+
 	//if (gpio_request_one(wlan_host_wake_up, GPIOF_IN, "WLAN_HOST_WAKE")) {
 	if (gpio_request(wlan_host_wake_up, "bcmdhd")) {
 		DHD_ERROR(("%s: Failed to request gpio %d for WLAN_HOST_WAKE\n",

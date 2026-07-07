@@ -72,6 +72,12 @@ extern volatile bool dhd_mmc_suspend;
 #endif
 #include "bcmsdh_sdmmc.h"
 
+#ifdef DHD_RELOAD_SDIO
+#include <linux/of.h>
+#include <linux/device.h>
+#include <linux/platform_device.h>
+#endif /* DHD_RELOAD_SDIO */
+
 /* dhd_sd_mmc_timing_uhs: dhd module param to select different SDIO Bus Speed Mode */
 int dhd_sd_mmc_timing_uhs = -1;
 module_param(dhd_sd_mmc_timing_uhs, int, 0);
@@ -262,6 +268,75 @@ sdioh_sdmmc_card_enablefuncs(sdioh_info_t *sd)
 	return FALSE;
 }
 
+#ifdef DHD_RELOAD_SDIO
+
+static int match_sdhci(struct device *dev, const void *data)
+{
+	struct device_node *np = dev->of_node;
+    u32 bus_width = 0;
+
+    if (!dev->of_node)
+        return 0;
+
+    /* generic: find all sdhci */
+	if (!strstr(dev_name(dev), "sdhci")) {
+		DHD_ERROR(("MATCH: %s node=%pOF\n",
+			dev_name(dev), dev->of_node));
+			return 0;
+	}
+	of_property_read_u32(np, "bus-width", &bus_width);
+	/* attributes that match the WiFi device */
+	if (!of_property_read_bool(np, "non-removable"))
+		return 0;
+	if (!of_property_read_bool(np, "no-sd"))
+		return 0;
+	if (!of_property_read_bool(np, "no-mmc"))
+		return 0;
+	if (bus_width != 4)
+		return 0;
+
+	DHD_TRACE(("MATCH WiFi SDIO host: %s node=%pOF bw=%u\n",
+		dev_name(dev), np, bus_width));
+
+    return 1;
+}
+
+struct device *sdioh_get_wl_device_node(void)
+{
+	struct device *dev;
+
+	dev = bus_find_device(&platform_bus_type, NULL, NULL, match_sdhci);
+	if (!dev) {
+		DHD_ERROR(("DHD: no sdhci found\n"));
+		return NULL;
+	}
+	return dev;
+}
+
+int sdioh_reprobe_sdhci(void)
+{
+	struct device *wlan_dev;
+	int ret;
+
+	wlan_dev = sdioh_get_wl_device_node();
+	DHD_TRACE(("DHD: selected dev=%s\n", dev_name(wlan_dev)));
+
+	if (!wlan_dev)
+		return -ENODEV;
+
+	DHD_TRACE(("%s: reprobe sdhci %s\n",
+				__FUNCTION__, dev_name(wlan_dev)));
+
+	device_release_driver(wlan_dev);
+	msleep(1000);
+
+	ret = device_attach(wlan_dev);
+
+	put_device(wlan_dev);
+
+	return (ret < 0) ? ret : BCME_OK;
+}
+#endif /* DHD_RELOAD_SDIO */
 #if defined(BCMDHD_MODULAR) && defined(RMMOD_CARD_DETECT)
 static struct sdio_func *g_func = NULL;
 

@@ -1764,6 +1764,9 @@ enum dot11_tag_ids {
 #define DOT11_MNG_EHT_CAP_ID			(DOT11_MNG_ID_EXT_ID + EXT_MNG_EHT_CAP_ID)
 #define EXT_MNG_EHT_OP_ID			101u	/* EHT Operation IE # FIXME */
 #define DOT11_MNG_EHT_OP_ID			(DOT11_MNG_ID_EXT_ID + EXT_MNG_EHT_OP_ID)
+#define EXT_MNG_AKM_SUITE_SELECTOR_ID           114u    /* AKM Suite Selector */
+#define DOT11_MNG_AKM_SUITE_SELECTOR_ID         (DOT11_MNG_ID_EXT_ID + \
+						 EXT_MNG_AKM_SUITE_SELECTOR_ID)
 
 /* unassigned IDs for ranging parameter elements. To be updated after final
  * assignement.
@@ -4937,6 +4940,7 @@ typedef struct dot11_sae_pk_element dot11_sae_pk_element_t;
 #define RSN_AKM_OWE			18	/* RFC 8110  OWE */
 #define RSN_AKM_FBT_SHA384_PSK		19
 #define RSN_AKM_PSK_SHA384		20
+#define RSN_AKM_SAE_EXT_PSK		24	/* AKM for SAE (variable length PMK) */
 /* OSEN authenticated key managment suite */
 #define OSEN_AKM_UNSPECIFIED	RSN_AKM_UNSPECIFIED	/* Over 802.1x */
 /* WFA DPP RSN authenticated key managment */
@@ -5919,6 +5923,16 @@ BWL_PRE_PACKED_STRUCT struct supp_op_classes_ie {
 	uint8 op_classes[];    /* Supported Operating Classes */
 } BWL_POST_PACKED_STRUCT;
 typedef struct supp_op_classes_ie supp_op_classes_ie_t;
+
+/* AKM Suite Selector IE */
+BWL_PRE_PACKED_STRUCT struct dot11_akm_suite_selector_ie {
+        uint8 id;                       /* DOT11_MNG_ID_EXT_ID */
+        uint8 len;
+        uint8 id_ext;                   /* EXT_MNG_AKM_SUITE_SELECTOR_ID */
+        uint8 oui[DOT11_OUI_LEN];       /* WPA2_OUI */
+        uint8 type;                     /* AKM type from P802.11-REVme/D2.1 table 9-188 */
+} BWL_POST_PACKED_STRUCT;
+typedef struct dot11_akm_suite_selector_ie dot11_akm_suite_selector_ie_t;
 
 /* Transition mode (bit number) */
 #define TRANSISION_MODE_WPA3_PSK		0u

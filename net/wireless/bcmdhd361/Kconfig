@@ -210,7 +210,6 @@ config BCMDHD_PCIE
 
 config BCMDHD_WFB
         bool "Support WFB-NG in DHD"
-        depends on BCMDHD_PCIE
         default n
         help
           Support WFB-NG

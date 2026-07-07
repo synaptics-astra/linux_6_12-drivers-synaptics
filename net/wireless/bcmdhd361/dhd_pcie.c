@@ -3701,6 +3701,8 @@ dhd_bus_download_firmware(struct dhd_bus *bus, osl_t *osh, char *pfw_path,
 
 #if defined(DHD_AUTOSEL_BINARY_FILENAME)
 	dhd_autosel_fwnv_name(bus->dhd, bus->fw_path, bus->nv_path, bus->fwsig_filename);
+	DHD_ERROR(("%s: firmware path=%s, nvram path=%s\n",
+			__FUNCTION__, bus->fw_path, bus->nv_path));
 #endif /* DHD_AUTOSEL_BINARY_FILENAME */
 
 	ret = dhdpcie_download_firmware(bus, osh);

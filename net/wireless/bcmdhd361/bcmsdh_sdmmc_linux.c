@@ -325,6 +325,7 @@ static int dummy_probe(struct sdio_func *func,
 			(id->vendor != SDIO_VENDOR_ID_SYNAPTICS)) {
 				return -ENODEV;
 			}
+#ifndef DHD_WFB
 #ifdef DHD_ASTRA_CUST_CHIP_SUPPORT
 		/* Only support 461x */
 		if ((id->vendor != SDIO_VENDOR_ID_SYNAPTICS) ||
@@ -334,7 +335,8 @@ static int dummy_probe(struct sdio_func *func,
 		} else {
 			sd_err(("%s: Found supported chip \n", __FUNCTION__));
 		}
-#endif
+#endif /* DHD_ASTRA_CUST_CHIP_SUPPORT */
+#endif /* !DHD_WFB */
 	}
 
 	if (func && (func->num != 2)) {

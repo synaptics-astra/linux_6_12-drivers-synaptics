@@ -335,6 +335,11 @@ static void wl_cfg80211_bt_handler(struct work_struct *work)
 		del_timer_sync(&btcx_inf->timer);
 	}
 
+	if (btcx_inf->dev && !(btcx_inf->dev->flags & IFF_UP)) {
+		WL_ERR(("%s: interface is DOWN\n", __func__));
+		return;
+	}
+
 	switch (btcx_inf->bt_state) {
 		case BT_DHCP_START:
 			/* DHCP started
@@ -417,6 +422,24 @@ void* wl_cfg80211_btcoex_init(struct net_device *ndev)
 
 	btcoex_info_loc = btco_inf;
 	return btco_inf;
+}
+
+void wl_cfg80211_btcoex_stop(void)
+{
+	if (!btcoex_info_loc) {
+		WL_ERR(("btcoex_stop: btcoex_info_loc is NULL\n"));
+		return;
+	}
+
+	WL_ERR(("btcoex_stop: cancel timer/work and restore coex\n"));
+
+	if (btcoex_info_loc->timer_on) {
+		btcoex_info_loc->timer_on = 0;
+		del_timer_sync(&btcoex_info_loc->timer);
+	}
+
+	cancel_work_sync(&btcoex_info_loc->work);
+	btcoex_info_loc->bt_state = BT_DHCP_IDLE;
 }
 
 void wl_cfg80211_btcoex_deinit(void)

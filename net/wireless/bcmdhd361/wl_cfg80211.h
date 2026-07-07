@@ -852,6 +852,8 @@ do {									\
 #define WLAN_AKM_SUITE_FT_FILS_SHA384		0x000FAC11
 #endif /* WLAN_AKM_SUITE_FILS_SHA256 */
 
+#define WLAN_AKM_SUITE_SAE_EXT_PSK        0x000FAC18
+
 #define MIN_VENDOR_EXTN_IE_LEN		2
 
 #ifdef WL_OWE
@@ -2792,12 +2794,10 @@ wl_iftype_to_str(int wl_iftype)
 #define bcmcfg_to_nmi_wdev(cfg) bcmcfg_to_prmry_wdev(cfg)
 #endif /* WL_NMI_IF */
 
-#ifdef WL_BLOCK_P2P_SCAN_ON_STA
 #define IS_P2P_IFACE(wdev) (wdev && \
-		((wdev->iftype == NL80211_IFTYPE_P2P_DEVICE) || \
-		(wdev->iftype == NL80211_IFTYPE_P2P_GO) || \
-		(wdev->iftype == NL80211_IFTYPE_P2P_CLIENT)))
-#endif /* WL_BLOCK_P2P_SCAN_ON_STA */
+	((wdev->iftype == NL80211_IFTYPE_P2P_DEVICE) || \
+	(wdev->iftype == NL80211_IFTYPE_P2P_GO) || \
+	(wdev->iftype == NL80211_IFTYPE_P2P_CLIENT)))
 
 #define IS_PRIMARY_NDEV(cfg, ndev)	(ndev == bcmcfg_to_prmry_ndev(cfg))
 #define IS_STA_IFACE(wdev) (wdev && \
@@ -3424,5 +3424,5 @@ extern struct ieee80211_channel * wl_cfg80211_get_ieee80211_chan(struct net_devi
 
 extern int wl_cfg80211_reg_dump_all(const char *pTip);
 extern int wl_cfg80211_set_softAP_csa(struct net_device *ndev);
-
+void wl_cfg80211_btcoex_stop(void);
 #endif /* _wl_cfg80211_h_ */

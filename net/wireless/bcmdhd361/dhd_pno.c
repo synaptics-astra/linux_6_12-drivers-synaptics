@@ -992,6 +992,7 @@ _dhd_pno_cfg(dhd_pub_t *dhd, uint16 *channel_list, int nchan)
 	int i = 0;
 	wl_pfn_cfg_t pfncfg_param;
 	bool use_chanspec = FALSE;
+	uint16 *pchanspec = NULL;
 	struct bcm_cfg80211 *cfg = wl_get_cfg(dhd_linux_get_primary_netdev(dhd));
 
 	/* When enable 6G, force to use chanspec list */
@@ -1004,17 +1005,23 @@ _dhd_pno_cfg(dhd_pub_t *dhd, uint16 *channel_list, int nchan)
 	(void)memset_s(&pfncfg_param, sizeof(wl_pfn_cfg_t), 0, sizeof(wl_pfn_cfg_t));
 
 	if (nchan) {
-		if (nchan > WL_NUMCHANNELS) {
-			return BCME_RANGE;
+		/* Most FW only support 64, If customer want to enlarge, need to sync with FW*/
+		if (nchan > 64) {
+			DHD_ERROR(("default FW only support 64 chan list. drop the tail chan list\n"));
+			nchan = 64;
 		}
 		DHD_PNO(("%s enter :  nchan : %d\n", __FUNCTION__, nchan));
 
+		pchanspec = &pfncfg_param.channel_list[0];
 		for (i = 0; i < nchan; i++) {
 			if ((dhd->wlc_ver_major >= DHD_PNO_CHSPEC_SUPPORT_VER) || use_chanspec) {
-				pfncfg_param.channel_list[i] = CH20MHZ_CHSPEC(channel_list[i]);
+				/* chanel_list may save chanspecs, check it before use */
+				*pchanspec = (channel_list[i] > 0x1000)?
+					channel_list[i]:wf_chspec_primary20_chspec(channel_list[i]);
 			} else {
-				pfncfg_param.channel_list[i] = channel_list[i];
+				*pchanspec = channel_list[i];
 			}
+			pchanspec++;
 		}
 	}
 

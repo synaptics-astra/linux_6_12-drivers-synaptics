@@ -4466,6 +4466,7 @@ extern void dhd_sssr_mempool_deinit(dhd_pub_t *dhd);
 extern int dhd_sssr_dump_init(dhd_pub_t *dhd);
 extern void dhd_sssr_dump_deinit(dhd_pub_t *dhd);
 extern int dhdpcie_sssr_dump(dhd_pub_t *dhd);
+extern int dhdsdio_sssr_dump(dhd_pub_t *dhd);
 extern void dhd_sssr_print_filepath(dhd_pub_t *dhd, char *path);
 extern int dhd_sssr_reg_info_init(dhd_pub_t *dhd);
 extern void dhd_sssr_reg_info_deinit(dhd_pub_t *dhd);

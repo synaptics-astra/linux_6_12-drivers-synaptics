@@ -590,6 +590,9 @@ typedef struct dhd_bus {
 #ifdef BT_MCU_RTOS_CONSOLE_LOGS
 	dhd_bt_console_t	bt_console;
 #endif /* BT_MCU_RTOS_CONSOLE_LOGS */
+	void *backplane_access_lock;
+	uint8 is_linkdown;
+	uint  coreid;                 /* CPU core id */
 } dhd_bus_t;
 
 #ifdef DHD_LINUX_STD_FW_API
@@ -613,6 +616,27 @@ static int dhdsdio_bus_save_download_info(dhd_bus_t *bus, uint32 download_addr,
 static int dhdsdio_download_otp_file(dhd_bus_t *bus, char *path);
 #endif /* BL_SIM_OTP */
 #endif /* FW_SIGNATURE */
+
+#ifdef DHD_SSSR_DUMP
+#define DHD_SDIO_CLOCKREQUESTSTATUS_REG          0x18104F34U
+#define DHD_SDIO_CLOCKCONTROLSTATUS_REG          0x180041E0U
+#define DHD_SDIO_CLOCKCONTROLSTATUS_CLEAR_VAL    0x0U
+#define DHD_SDIO_SR_HAPPENED_DIGITAL_REG         0x1801802CU
+#define DHD_SDIO_SR_HAPPENED_MAIN_REG            0x1801302CU
+
+static uint sdio_backplane_access(dhd_bus_t *bus, uint addr, uint size, uint *val, bool read);
+static int dhdsdio_clear_intmask_and_timer(dhd_pub_t *dhd);
+static int dhdsdio_clear_clk_req(dhd_pub_t *dhd);
+static uint32 dhdsdio_suspend_chipcommon_powerctrl(dhd_pub_t *dhd);
+static uint32 dhdsdio_resume_chipcommon_powerctrl(dhd_pub_t *dhd, uint32 reg_val);
+static int dhdsdio_arm_resume_clk_req(dhd_pub_t *dhd);
+static int dhdsdio_bring_d11_outofreset(dhd_pub_t *dhd);
+void dhd_fill_sssr_reg_info_4362(dhd_pub_t *dhd);
+void dhdsdio_sr_happened(dhd_pub_t *dhd, bool set);
+#endif /* DHD_SSSR_DUMP */
+#ifdef PWRSTATS_SYSFS
+uint64 dhdsdio_get_last_suspend_time(dhd_pub_t *dhdp);
+#endif /* PWRSTATS_SYSFS */
 
 /*
  * Whenever DHD_IDLE_IMMEDIATE condition is handled, we have to now check if
@@ -2077,7 +2101,11 @@ dhdsdio_bussleep(dhd_bus_t *bus, bool sleep)
 	         (sleep ? "SLEEP" : "WAKE"),
 	          (bus->sleeping ? "SLEEP" : "WAKE")));
 
+#ifdef DHD_SSSR_DUMP
+	if (bus->dhd->hang_was_sent && !bus->dhd->collect_sssr)
+#else
 	if (bus->dhd->hang_was_sent)
+#endif /* DHD_SSSR_DUMP */
 		return BCME_ERROR;
 
 	/* Done if we're already in the requested state */
@@ -4532,6 +4560,10 @@ printbuf:
 		  * locking has been put up as a cleanup activity and a thorough
 		  * code walkthrough is needed.
 		  */
+#ifdef DHD_SSSR_DUMP
+		DHD_ERROR(("%s : Set collect_sssr as TRUE\n", __FUNCTION__));
+		bus->dhd->collect_sssr = TRUE;
+#endif /* DHD_SSSR_DUMP */
 		dhd_os_sdunlock(bus->dhd);
 		dhdsdio_mem_dump(bus);
 		dhd_os_sdlock(bus->dhd);
@@ -9932,6 +9964,1234 @@ dhd_bus_watchdog(dhd_pub_t *dhdp)
 	return bus->ipend;
 }
 
+#ifdef DHD_SSSR_DUMP
+static INLINE void
+dhd_sbreg_op(dhd_pub_t *dhd, uint addr, uint *val, bool read)
+{
+	OSL_DELAY(1);
+	if (sdio_backplane_access(dhd->bus, addr, sizeof(uint), val, read) != BCME_OK) {
+		DHD_ERROR(("sbreg: Invalid uint addr: 0x%x \n", addr));
+	} else {
+		DHD_ERROR(("sbreg: addr:0x%x val:0x%x read:%d\n", addr, *val, read));
+	}
+	return;
+}
+
+static void
+dhdsdio_force_mac_quiesce(dhd_pub_t *dhd)
+{
+	uint maccontrol = 0x18001120; /* dot11mac MACCONTROL offset: 0x120 */
+	uint val = 0;
+
+	/* Force MAC into silent state so watchdog bit cannot block SSSR */
+	dhd_sbreg_op(dhd, maccontrol, &val, FALSE);
+
+	maccontrol = 0x18001128;
+	val = 0xffff;
+	/* Force MAC into silent state so watchdog bit cannot block SSSR */
+	dhd_sbreg_op(dhd, maccontrol, &val, FALSE);
+}
+
+static int
+dhdsdio_clear_intmask_and_timer(dhd_pub_t *dhd)
+{
+	uint addr;
+	uint val;
+	uint32 cc_intmask, pmuintmask0, pmuintmask1, resreqtimer, macresreqtimer,
+	       macresreqtimer1, vasip_sr_size = 0;
+
+	DHD_ERROR(("%s\n", __FUNCTION__));
+
+	/* SSSR register information structure v0 and v1 shares most except dig_mem */
+	switch (dhd->sssr_reg_info->rev2.version) {
+		case SSSR_REG_INFO_VER_3 :
+			/* intentional fall through */
+		case SSSR_REG_INFO_VER_2 :
+			cc_intmask = dhd->sssr_reg_info->rev2.chipcommon_regs.base_regs.intmask;
+			pmuintmask0 = dhd->sssr_reg_info->rev2.pmu_regs.base_regs.pmuintmask0;
+			pmuintmask1 = dhd->sssr_reg_info->rev2.pmu_regs.base_regs.pmuintmask1;
+			resreqtimer = dhd->sssr_reg_info->rev2.pmu_regs.base_regs.resreqtimer;
+			macresreqtimer = dhd->sssr_reg_info->rev2.pmu_regs.base_regs.macresreqtimer;
+			macresreqtimer1 = dhd->sssr_reg_info->rev2.
+				pmu_regs.base_regs.macresreqtimer1;
+			break;
+		case SSSR_REG_INFO_VER_1 :
+		case SSSR_REG_INFO_VER_0 :
+			cc_intmask = dhd->sssr_reg_info->rev1.chipcommon_regs.base_regs.intmask;
+			pmuintmask0 = dhd->sssr_reg_info->rev1.pmu_regs.base_regs.pmuintmask0;
+			pmuintmask1 = dhd->sssr_reg_info->rev1.pmu_regs.base_regs.pmuintmask1;
+			resreqtimer = dhd->sssr_reg_info->rev1.pmu_regs.base_regs.resreqtimer;
+			macresreqtimer = dhd->sssr_reg_info->rev1.pmu_regs.base_regs.macresreqtimer;
+			macresreqtimer1 = dhd->sssr_reg_info->rev1.
+				pmu_regs.base_regs.macresreqtimer1;
+			vasip_sr_size = dhd->sssr_reg_info->rev1.vasip_regs.vasip_sr_size;
+			break;
+		default :
+			DHD_ERROR(("invalid sssr_reg_ver"));
+			return BCME_UNSUPPORTED;
+	}
+
+	/* clear chipcommon intmask */
+	val = 0x0;
+	dhd_sbreg_op(dhd, cc_intmask, &val, FALSE);
+
+	/* clear PMUIntMask0 */
+	val = 0x0;
+	dhd_sbreg_op(dhd, pmuintmask0, &val, FALSE);
+
+	/* clear PMUIntMask1 */
+	val = 0x0;
+	dhd_sbreg_op(dhd, pmuintmask1, &val, FALSE);
+
+	/* clear res_req_timer */
+	val = 0x0;
+	dhd_sbreg_op(dhd, resreqtimer, &val, FALSE);
+
+	/* clear res_req_mask - Clear ResourceReqMask0 to prevent auto-reassertion */
+	addr = resreqtimer + 0x4;	/* ResourceReqMask0 is +0x4 from ResourceReqTimer0 */
+	val = 0x0;
+	dhd_sbreg_op(dhd, addr, &val, FALSE);
+
+	/* clear macresreqtimer */
+	val = 0x0;
+	dhd_sbreg_op(dhd, macresreqtimer, &val, FALSE);
+
+	/* clear macresreqtimer1 */
+	val = 0x0;
+	dhd_sbreg_op(dhd, macresreqtimer1, &val, FALSE);
+
+	/* clear VasipClkEn */
+	if (vasip_sr_size) {
+		addr = dhd->sssr_reg_info->rev1.vasip_regs.wrapper_regs.ioctrl;
+		val = 0x0;
+		dhd_sbreg_op(dhd, addr, &val, FALSE);
+	}
+
+	return BCME_OK;
+}
+
+int
+sd_backplane_access(dhd_bus_t *bus, uint addr, uint size, uint *val, bool read)
+{
+	if (read)
+		*val = bcmsdh_reg_read(bus->sdh, addr, size);
+	else
+		bcmsdh_reg_write(bus->sdh, addr, size, *val);
+
+	if (bcmsdh_regfail(bus->sdh))
+		return BCME_SDIO_ERROR;
+
+	return BCME_OK;
+}
+
+static uint
+sdio_backplane_access(dhd_bus_t *bus, uint addr, uint size, uint *val, bool read)
+{
+	uint ret;
+	unsigned long flags;
+
+	DHD_BACKPLANE_ACCESS_LOCK(bus->backplane_access_lock, flags);
+	ret = sd_backplane_access(bus, addr, size, val, read);
+	DHD_BACKPLANE_ACCESS_UNLOCK(bus->backplane_access_lock, flags);
+	return ret;
+}
+
+static int
+dhdsdio_d11_check_outofreset(dhd_pub_t *dhd)
+{
+	int i;
+	uint addr = 0;
+	uint val = 0;
+	uint8 num_d11cores;
+
+	DHD_ERROR(("%s\n", __FUNCTION__));
+
+	num_d11cores = dhd_d11_slices_num_get(dhd);
+
+	for (i = 0; i < num_d11cores; i++) {
+		/* Check if bit 0 of resetctrl is cleared */
+		/* SSSR register information structure v0 and
+		 * v1 shares most except dig_mem
+		 */
+		switch (dhd->sssr_reg_info->rev2.version) {
+			case SSSR_REG_INFO_VER_3 :
+				/* intentional fall through */
+			case SSSR_REG_INFO_VER_2 :
+				addr = dhd->sssr_reg_info->rev2.
+					mac_regs[i].wrapper_regs.resetctrl;
+				break;
+			case SSSR_REG_INFO_VER_1 :
+			case SSSR_REG_INFO_VER_0 :
+				addr = dhd->sssr_reg_info->rev1.
+					mac_regs[i].wrapper_regs.resetctrl;
+				break;
+			default :
+				DHD_ERROR(("invalid sssr_reg_ver"));
+				return BCME_UNSUPPORTED;
+		}
+		if (!addr) {
+			DHD_ERROR(("%s: skipping for core[%d] as 'addr' is NULL\n",
+				__FUNCTION__, i));
+			continue;
+		}
+		dhd_sbreg_op(dhd, addr, &val, TRUE);
+		if (!(val & 1)) {
+			dhd->sssr_d11_outofreset[i] = TRUE;
+		} else {
+			dhd->sssr_d11_outofreset[i] = FALSE;
+		}
+		DHD_ERROR(("%s: sssr_d11_outofreset[%d] : %d\n",
+				__FUNCTION__, i, dhd->sssr_d11_outofreset[i]));
+	}
+
+	return BCME_OK;
+}
+
+uint8
+dhd_d11_slices_num_get(dhd_pub_t *dhdp)
+{
+	return si_scan_core_present(dhdp->bus->sih) ?
+		MAX_NUM_D11_CORES_WITH_SCAN : MAX_NUM_D11CORES;
+}
+
+static int
+dhdsdio_arm_clear_clk_req(dhd_pub_t *dhd)
+{
+	uint val = 0;
+	uint32 resetctrl, clockrequeststatus, clockcontrolstatus, clockcontrolstatus_val;
+
+	DHD_ERROR(("%s\n", __FUNCTION__));
+
+	/* SSSR register information structure v0 and v1 shares most except dig_mem */
+	switch (dhd->sssr_reg_info->rev2.version) {
+		case SSSR_REG_INFO_VER_3 :
+			/* intentional fall through */
+		case SSSR_REG_INFO_VER_2 :
+			resetctrl = dhd->sssr_reg_info->rev2.
+				arm_regs.wrapper_regs.resetctrl;
+			clockrequeststatus = dhd->sssr_reg_info->rev2.
+				arm_regs.wrapper_regs.extrsrcreq;
+			clockcontrolstatus = dhd->sssr_reg_info->rev2.
+				arm_regs.base_regs.clockcontrolstatus;
+			clockcontrolstatus_val = dhd->sssr_reg_info->rev2.
+				arm_regs.base_regs.clockcontrolstatus_val;
+			break;
+		case SSSR_REG_INFO_VER_1 :
+		case SSSR_REG_INFO_VER_0 :
+			resetctrl = dhd->sssr_reg_info->rev1.
+				arm_regs.wrapper_regs.resetctrl;
+			clockrequeststatus = dhd->sssr_reg_info->rev1.
+				arm_regs.wrapper_regs.itopoobb;
+			clockcontrolstatus = dhd->sssr_reg_info->rev1.
+				arm_regs.base_regs.clockcontrolstatus;
+			clockcontrolstatus_val = dhd->sssr_reg_info->rev1.
+				arm_regs.base_regs.clockcontrolstatus_val;
+			break;
+		default :
+			DHD_ERROR(("invalid sssr_reg_ver"));
+			return BCME_UNSUPPORTED;
+	}
+
+	/* Check if bit 0 of resetctrl is cleared */
+	dhd_sbreg_op(dhd, resetctrl, &val, TRUE);
+	if (!(val & 1)) {
+		/* clear request clk only if itopoobb/extrsrcreqs is non zero */
+		dhd_sbreg_op(dhd, clockrequeststatus, &val, TRUE);
+		if (val != 0) {
+			/* clear clockcontrolstatus */
+			dhd_sbreg_op(dhd, clockcontrolstatus, &clockcontrolstatus_val, FALSE);
+		}
+	}
+
+	return BCME_OK;
+}
+
+static int
+dhdsdio_d11_clear_clk_req(dhd_pub_t *dhd)
+{
+	int i;
+	uint val = 0;
+	uint8 num_d11cores;
+	uint32 clockrequeststatus, clockcontrolstatus, clockcontrolstatus_val;
+
+	DHD_ERROR(("%s\n", __FUNCTION__));
+
+	num_d11cores = dhd_d11_slices_num_get(dhd);
+
+	for (i = 0; i < num_d11cores; i++) {
+		if (dhd->sssr_d11_outofreset[i]) {
+			/* clear request clk only if itopoobb/extrsrcreqs is non zero */
+			/* SSSR register information structure v0 and
+			 * v1 shares most except dig_mem
+			 */
+			switch (dhd->sssr_reg_info->rev2.version) {
+				case SSSR_REG_INFO_VER_3 :
+					/* intentional fall through */
+				case SSSR_REG_INFO_VER_2 :
+					clockrequeststatus = dhd->sssr_reg_info->rev2.
+						mac_regs[i].wrapper_regs.extrsrcreq;
+					clockcontrolstatus = dhd->sssr_reg_info->rev2.
+						mac_regs[i].base_regs.clockcontrolstatus;
+					clockcontrolstatus_val = dhd->sssr_reg_info->rev2.
+						mac_regs[i].base_regs.clockcontrolstatus_val;
+					break;
+				case SSSR_REG_INFO_VER_1 :
+				case SSSR_REG_INFO_VER_0 :
+					clockrequeststatus = dhd->sssr_reg_info->rev1.
+						mac_regs[i].wrapper_regs.itopoobb;
+					clockcontrolstatus = dhd->sssr_reg_info->rev1.
+						mac_regs[i].base_regs.clockcontrolstatus;
+					clockcontrolstatus_val = dhd->sssr_reg_info->rev1.
+						mac_regs[i].base_regs.clockcontrolstatus_val;
+					break;
+				default :
+					DHD_ERROR(("invalid sssr_reg_ver"));
+					return BCME_UNSUPPORTED;
+			}
+			dhd_sbreg_op(dhd, clockrequeststatus, &val, TRUE);
+			if (val != 0) {
+				/* clear clockcontrolstatus */
+				dhd_sbreg_op(dhd, clockcontrolstatus,
+						&clockcontrolstatus_val, FALSE);
+			}
+		}
+	}
+	return BCME_OK;
+}
+
+static int
+dhdsdio_clear_intmask_and_clkctl(dhd_pub_t *dhd)
+{
+	uint val = 0;
+	int i;
+
+	/* Core register base offsets and their interrupt status / mask / clock control addresses */
+	struct {
+		const char *core_name;	/* Core name */
+		uint32 int_status;		/* Interrupt Status register offset 0x20 */
+		uint32 int_mask;		/* Interrupt Mask register offset 0x24 */
+		uint32 clk_ctrl;		/* Clock Control and Status register offset 0x1E0 */
+	} cores[] = {
+		/* CHIPCOMMON CORE */
+		{
+			.core_name = "CHIPCOMMON",
+			.int_status = 0x18000020,
+			.int_mask = 0x18000024,
+			.clk_ctrl = 0x180001E0
+		},
+		/* DOT11MAC (CORE0) */
+		{
+			.core_name = "DOT11MAC",
+			.int_status = 0x18001128,
+			.int_mask = 0x1800112C,
+			.clk_ctrl = 0x180011E0
+		},
+		/* ARM CR4 CORE */
+		{
+			.core_name = "ARM_CR4",
+			.int_status = 0x18002020,
+			.int_mask = 0x18002024,
+			.clk_ctrl = 0x180021E0
+		},
+		/* GCI CORE */
+		{
+			.core_name = "GCI",
+			.int_status = 0x18010020,
+			.int_mask = 0x18010024,
+			.clk_ctrl = 0x180101E0
+		},
+		/* PMU CORE */
+		{
+			.core_name = "PMU",
+			.int_status = 0x18012020,
+			.int_mask = 0x18012024,
+			.clk_ctrl = 0x180121E0
+		},
+		/* SDIOD CORE - Process last */
+		{
+			.core_name = "SDIOD",
+			.int_status = 0x18004020,
+			.int_mask = 0x18004024,
+			.clk_ctrl = 0x180041E0
+		}
+	};
+
+	DHD_ERROR(("%s\n", __FUNCTION__));
+
+	for (i = 0; i < ARRAYSIZE(cores); i++) {
+		DHD_ERROR(("%s: Processing core[%d] %s\n", __FUNCTION__, i, cores[i].core_name));
+
+		/* Clear interrupt status by writing 0xFFFFFFFF (write-to-clear) */
+		DHD_ERROR(("%s:   [%s] Clearing int_status (0x%x)\n",
+			__FUNCTION__, cores[i].core_name, cores[i].int_status));
+		val = 0xFFFFFFFF;
+		dhd_sbreg_op(dhd, cores[i].int_status, &val, FALSE);
+
+		/* Clear interrupt mask by writing 0x00000000 */
+		DHD_ERROR(("%s:   [%s] Clearing int_mask (0x%x)\n",
+			__FUNCTION__, cores[i].core_name, cores[i].int_mask));
+		val = 0x00000000;
+		dhd_sbreg_op(dhd, cores[i].int_mask, &val, FALSE);
+
+		/* Clear clock control status by writing 0x20 */
+		DHD_ERROR(("%s:   [%s] Clearing clk_ctrl (0x%x) with value 0x20\n",
+			__FUNCTION__, cores[i].core_name, cores[i].clk_ctrl));
+		val = 0x20;
+		dhd_sbreg_op(dhd, cores[i].clk_ctrl, &val, FALSE);
+
+		DHD_ERROR(("%s:   [%s] Done\n", __FUNCTION__, cores[i].core_name));
+	}
+
+	return BCME_OK;
+}
+
+static int
+dhdsdio_sdio_clear_clk_req(dhd_pub_t *dhd)
+{
+	uint val = 0;
+	uint32 clockrequeststatus, clockcontrolstatus_addr, clockcontrolstatus_val;
+
+	DHD_ERROR(("%s\n", __FUNCTION__));
+
+	/* SSSR register information structure v0 and v1 shares most except dig_mem */
+	switch (dhd->sssr_reg_info->rev2.version) {
+		case SSSR_REG_INFO_VER_3 :
+			/* intentional fall through */
+		case SSSR_REG_INFO_VER_2 :
+			clockrequeststatus = DHD_SDIO_CLOCKREQUESTSTATUS_REG;
+			clockcontrolstatus_addr = DHD_SDIO_CLOCKCONTROLSTATUS_REG;
+			clockcontrolstatus_val = DHD_SDIO_CLOCKCONTROLSTATUS_CLEAR_VAL;
+			break;
+		case SSSR_REG_INFO_VER_1 :
+		case SSSR_REG_INFO_VER_0 :
+			clockrequeststatus = DHD_SDIO_CLOCKREQUESTSTATUS_REG;
+			clockcontrolstatus_addr = DHD_SDIO_CLOCKCONTROLSTATUS_REG;
+			clockcontrolstatus_val = DHD_SDIO_CLOCKCONTROLSTATUS_CLEAR_VAL;
+			break;
+		default :
+			DHD_ERROR(("invalid sssr_reg_ver"));
+			return BCME_UNSUPPORTED;
+	}
+
+	/* clear request clk only if itopoobb/extrsrcreqs is non zero */
+	dhd_sbreg_op(dhd, clockrequeststatus, &val, TRUE);
+	if (val) {
+		/* clear clockcontrolstatus */
+		dhd_sbreg_op(dhd, clockcontrolstatus_addr, &clockcontrolstatus_val, FALSE);
+	}
+	return BCME_OK;
+}
+
+static int
+dhdsdio_clear_clk_req(dhd_pub_t *dhd)
+{
+	DHD_ERROR(("%s\n", __FUNCTION__));
+
+	dhdsdio_arm_clear_clk_req(dhd);
+
+	dhdsdio_d11_clear_clk_req(dhd);
+
+	dhdsdio_force_mac_quiesce(dhd);
+
+	dhdsdio_sdio_clear_clk_req(dhd);
+
+	dhdsdio_clear_intmask_and_clkctl(dhd);
+
+	return BCME_OK;
+}
+
+static uint32
+dhdsdio_suspend_chipcommon_powerctrl(dhd_pub_t *dhd)
+{
+	uint addr;
+	uint val = 0, reg_val = 0;
+	uint powerctrl_mask;
+
+	DHD_ERROR(("%s\n", __FUNCTION__));
+
+	/* SSSR register information structure v0 and v1 shares most except dig_mem */
+	switch (dhd->sssr_reg_info->rev2.version) {
+		case SSSR_REG_INFO_VER_3 :
+			/* intentional fall through */
+		case SSSR_REG_INFO_VER_2 :
+			addr = dhd->sssr_reg_info->rev2.chipcommon_regs.base_regs.powerctrl;
+			powerctrl_mask = dhd->sssr_reg_info->rev2.
+				chipcommon_regs.base_regs.powerctrl_mask;
+			break;
+		case SSSR_REG_INFO_VER_1 :
+		case SSSR_REG_INFO_VER_0 :
+			addr = dhd->sssr_reg_info->rev1.chipcommon_regs.base_regs.powerctrl;
+			powerctrl_mask = dhd->sssr_reg_info->rev1.
+				chipcommon_regs.base_regs.powerctrl_mask;
+			break;
+		default :
+			DHD_ERROR(("invalid sssr_reg_ver"));
+			return BCME_UNSUPPORTED;
+	}
+
+	/* conditionally clear bits [11:8] of PowerCtrl */
+	dhd_sbreg_op(dhd, addr, &reg_val, TRUE);
+	if (reg_val & powerctrl_mask) {
+		val = 0;
+		dhd_sbreg_op(dhd, addr, &val, FALSE);
+	}
+	return reg_val;
+}
+
+static int
+dhdsdio_arm_resume_clk_req(dhd_pub_t *dhd)
+{
+	uint val = 0;
+	uint32 resetctrl;
+
+	DHD_ERROR(("%s\n", __FUNCTION__));
+
+	/* SSSR register information structure v0 and v1 shares most except dig_mem */
+	switch (dhd->sssr_reg_info->rev2.version) {
+		case SSSR_REG_INFO_VER_3 :
+			/* intentional fall through */
+		case SSSR_REG_INFO_VER_2 :
+			resetctrl = dhd->sssr_reg_info->rev2.
+				arm_regs.wrapper_regs.resetctrl;
+			break;
+		case SSSR_REG_INFO_VER_1 :
+		case SSSR_REG_INFO_VER_0 :
+			resetctrl = dhd->sssr_reg_info->rev1.
+				arm_regs.wrapper_regs.resetctrl;
+			break;
+		default :
+			DHD_ERROR(("invalid sssr_reg_ver"));
+			return BCME_UNSUPPORTED;
+	}
+
+	/* Check if bit 0 of resetctrl is cleared */
+	dhd_sbreg_op(dhd, resetctrl, &val, TRUE);
+
+	return BCME_OK;
+}
+
+static uint32
+dhdsdio_resume_chipcommon_powerctrl(dhd_pub_t *dhd, uint32 reg_val)
+{
+	uint addr;
+	uint val = 0;
+	uint powerctrl_mask;
+
+	DHD_ERROR(("%s\n", __FUNCTION__));
+
+	/* SSSR register information structure v0 and v1 shares most except dig_mem */
+	switch (dhd->sssr_reg_info->rev2.version) {
+		case SSSR_REG_INFO_VER_3 :
+			/* intentional fall through */
+		case SSSR_REG_INFO_VER_2 :
+			addr = dhd->sssr_reg_info->rev2.chipcommon_regs.base_regs.powerctrl;
+			powerctrl_mask = dhd->sssr_reg_info->rev2.
+				chipcommon_regs.base_regs.powerctrl_mask;
+			break;
+		case SSSR_REG_INFO_VER_1 :
+		case SSSR_REG_INFO_VER_0 :
+			addr = dhd->sssr_reg_info->rev1.chipcommon_regs.base_regs.powerctrl;
+			powerctrl_mask = dhd->sssr_reg_info->rev1.
+				chipcommon_regs.base_regs.powerctrl_mask;
+			break;
+		default :
+			DHD_ERROR(("invalid sssr_reg_ver"));
+			return BCME_UNSUPPORTED;
+	}
+
+	/* conditionally clear bits [11:8] of PowerCtrl */
+	dhd_sbreg_op(dhd, addr, &val, TRUE);
+
+	if (!(val & powerctrl_mask)) {
+		dhd_sbreg_op(dhd, addr, &reg_val, FALSE);
+	}
+	return BCME_OK;
+}
+
+static int
+dhdsdio_bring_d11_outofreset(dhd_pub_t *dhd)
+{
+	int i;
+	uint val = 0;
+	uint8 num_d11cores;
+	uint32 resetctrl_addr, ioctrl_addr, ioctrl_resetseq_val0, ioctrl_resetseq_val1,
+	       ioctrl_resetseq_val2, ioctrl_resetseq_val3, ioctrl_resetseq_val4;
+
+	DHD_ERROR(("%s\n", __FUNCTION__));
+
+	num_d11cores = dhd_d11_slices_num_get(dhd);
+
+	for (i = 0; i < num_d11cores; i++) {
+		if (dhd->sssr_d11_outofreset[i]) {
+			/* SSSR register information structure v0 and v1 shares
+			 * most except dig_mem
+			 */
+			switch (dhd->sssr_reg_info->rev2.version) {
+				case SSSR_REG_INFO_VER_3 :
+					/* intentional fall through */
+				case SSSR_REG_INFO_VER_2 :
+					resetctrl_addr = dhd->sssr_reg_info->rev2.mac_regs[i].
+						wrapper_regs.resetctrl;
+					ioctrl_addr = dhd->sssr_reg_info->rev2.mac_regs[i].
+						wrapper_regs.ioctrl;
+					ioctrl_resetseq_val0 = dhd->sssr_reg_info->rev2.
+						mac_regs[0].wrapper_regs.ioctrl_resetseq_val[0];
+					ioctrl_resetseq_val1 = dhd->sssr_reg_info->rev2.
+						mac_regs[0].wrapper_regs.ioctrl_resetseq_val[1];
+					ioctrl_resetseq_val2 = dhd->sssr_reg_info->rev2.
+						mac_regs[0].wrapper_regs.ioctrl_resetseq_val[2];
+					ioctrl_resetseq_val3 = dhd->sssr_reg_info->rev2.
+						mac_regs[0].wrapper_regs.ioctrl_resetseq_val[3];
+					ioctrl_resetseq_val4 = dhd->sssr_reg_info->rev2.
+						mac_regs[0].wrapper_regs.ioctrl_resetseq_val[4];
+					break;
+				case SSSR_REG_INFO_VER_1 :
+				case SSSR_REG_INFO_VER_0 :
+					resetctrl_addr = dhd->sssr_reg_info->rev1.mac_regs[i].
+						wrapper_regs.resetctrl;
+					ioctrl_addr = dhd->sssr_reg_info->rev1.mac_regs[i].
+						wrapper_regs.ioctrl;
+					ioctrl_resetseq_val0 = dhd->sssr_reg_info->rev1.
+						mac_regs[0].wrapper_regs.ioctrl_resetseq_val[0];
+					ioctrl_resetseq_val1 = dhd->sssr_reg_info->rev1.
+						mac_regs[0].wrapper_regs.ioctrl_resetseq_val[1];
+					ioctrl_resetseq_val2 = dhd->sssr_reg_info->rev1.
+						mac_regs[0].wrapper_regs.ioctrl_resetseq_val[2];
+					ioctrl_resetseq_val3 = dhd->sssr_reg_info->rev1.
+						mac_regs[0].wrapper_regs.ioctrl_resetseq_val[3];
+					ioctrl_resetseq_val4 = dhd->sssr_reg_info->rev1.
+						mac_regs[0].wrapper_regs.ioctrl_resetseq_val[4];
+					break;
+				default :
+					DHD_ERROR(("invalid sssr_reg_ver"));
+					return BCME_UNSUPPORTED;
+			}
+			/* disable core by setting bit 0 */
+			val = 1;
+			dhd_sbreg_op(dhd, resetctrl_addr, &val, FALSE);
+			OSL_DELAY(6000);
+
+			dhd_sbreg_op(dhd, ioctrl_addr, &ioctrl_resetseq_val0, FALSE);
+
+			dhd_sbreg_op(dhd, ioctrl_addr, &ioctrl_resetseq_val1, FALSE);
+
+			/* enable core by clearing bit 0 */
+			val = 0;
+			dhd_sbreg_op(dhd, resetctrl_addr, &val, FALSE);
+
+			dhd_sbreg_op(dhd, ioctrl_addr, &ioctrl_resetseq_val2, FALSE);
+
+			dhd_sbreg_op(dhd, ioctrl_addr, &ioctrl_resetseq_val3, FALSE);
+
+			dhd_sbreg_op(dhd, ioctrl_addr, &ioctrl_resetseq_val4, FALSE);
+		}
+	}
+	return BCME_OK;
+}
+
+static int
+dhdsdio_get_sssr_fifo_dump(dhd_pub_t *dhd, uint *buf, uint fifo_size,
+        uint addr_reg, uint data_reg)
+{
+	uint addr;
+	uint val = 0;
+	uint offset;
+	uint fifo_base_offset = 0;
+	int i;
+	int retry;
+	const int max_retry = 5;
+
+	DHD_ERROR(("%s\n", __FUNCTION__));
+
+	if (!buf) {
+		DHD_ERROR(("%s: buf is NULL\n", __FUNCTION__));
+		return BCME_ERROR;
+	}
+
+	if (!fifo_size) {
+		DHD_ERROR(("%s: fifo_size is 0\n", __FUNCTION__));
+		return BCME_ERROR;
+	}
+
+	/* Set the base address offset to 0 */
+	addr = addr_reg;
+
+	if (BCM5312_CHIP(dhd->bus->sih->chip)) {
+		 /* For 5312 FIFO address offset is set by writing to addr_reg */
+		fifo_base_offset = 0x2000;
+	} else {
+		/* For other chips, FIFO address offset is set by writing to data_reg */
+		fifo_base_offset = 0;
+	}
+
+	val = fifo_base_offset;
+	dhd_sbreg_op(dhd, addr, &val, FALSE);
+	addr = data_reg;
+	/* Read 4 bytes at once and loop for fifo_size / 4 */
+	for (i = 0; i < fifo_size / 4; i++) {
+		for (retry = 0; retry < max_retry; retry++) {
+			if (sdio_backplane_access(dhd->bus, addr,
+				sizeof(uint), &val, TRUE) == BCME_OK) {
+				break;
+			}
+
+			if ((retry == 0) || (retry == (max_retry - 1))) {
+				DHD_ERROR(("%s: sdio_backplane_access failed i=%d retry=%d\n",
+					__FUNCTION__, i, retry));
+			}
+
+			/* Restore FIFO read pointer to current index before retrying */
+			offset = fifo_base_offset + (uint)(i * sizeof(uint));
+			if (sdio_backplane_access(dhd->bus, addr_reg,
+				sizeof(uint), &offset, FALSE) != BCME_OK) {
+				DHD_ERROR(("%s: failed to restore fifo offset=0x%x\n",
+					__FUNCTION__, offset));
+			}
+			OSL_DELAY(50);
+		}
+
+		if (retry == max_retry) {
+			DHD_ERROR(("%s: error in sdio_backplane_access\n", __FUNCTION__));
+			return BCME_ERROR;
+		}
+
+		buf[i] = val;
+		OSL_DELAY(1);
+	}
+	return BCME_OK;
+}
+
+static int
+dhdsdio_get_sssr_dig_dump(dhd_pub_t *dhd, uint *buf, uint fifo_size,
+        uint addr_reg)
+{
+	uint addr;
+	uint val = 0;
+	int i;
+	si_t *sih = dhd->bus->sih;
+	bool vasip_enab, dig_mem_check;
+	uint32 ioctrl_addr = 0;
+
+	DHD_ERROR(("%s addr_reg=0x%x size=0x%x\n", __FUNCTION__, addr_reg, fifo_size));
+
+	if (!buf) {
+		DHD_ERROR(("%s: buf is NULL\n", __FUNCTION__));
+		return BCME_ERROR;
+	}
+
+	if (!fifo_size) {
+		DHD_ERROR(("%s: fifo_size is 0\n", __FUNCTION__));
+		return BCME_ERROR;
+	}
+
+	vasip_enab = FALSE;
+	dig_mem_check = FALSE;
+	/* SSSR register information structure v0 and v1 shares most except dig_mem */
+	switch (dhd->sssr_reg_info->rev2.version) {
+		case SSSR_REG_INFO_VER_3 :
+			/* intentional fall through */
+		case SSSR_REG_INFO_VER_2 :
+			if ((dhd->sssr_reg_info->rev2.length > OFFSETOF(sssr_reg_info_v2_t,
+			dig_mem_info)) && dhd->sssr_reg_info->rev2.dig_mem_info.dig_sr_size) {
+				dig_mem_check = TRUE;
+			}
+			break;
+		case SSSR_REG_INFO_VER_1 :
+			if (dhd->sssr_reg_info->rev1.vasip_regs.vasip_sr_size) {
+				vasip_enab = TRUE;
+			} else if ((dhd->sssr_reg_info->rev1.length > OFFSETOF(sssr_reg_info_v1_t,
+				dig_mem_info)) && dhd->sssr_reg_info->rev1.
+				dig_mem_info.dig_sr_size) {
+				dig_mem_check = TRUE;
+			}
+			ioctrl_addr = dhd->sssr_reg_info->rev1.vasip_regs.wrapper_regs.ioctrl;
+			break;
+		case SSSR_REG_INFO_VER_0 :
+			if (dhd->sssr_reg_info->rev0.vasip_regs.vasip_sr_size) {
+				vasip_enab = TRUE;
+			}
+			ioctrl_addr = dhd->sssr_reg_info->rev0.vasip_regs.wrapper_regs.ioctrl;
+			break;
+		default :
+			DHD_ERROR(("invalid sssr_reg_ver"));
+			return BCME_UNSUPPORTED;
+	}
+	if (addr_reg) {
+		DHD_ERROR(("dig_mem_check=%d vasip_enab=%d\n", dig_mem_check, vasip_enab));
+		if (!vasip_enab && dig_mem_check) {
+			int err = dhdsdio_membytes(dhd->bus, FALSE, addr_reg, (uint8 *)buf,
+					fifo_size);
+			if (err != BCME_OK) {
+				DHD_ERROR(("%s: Error reading dig dump from dongle !\n",
+					__FUNCTION__));
+				return BCME_ERROR;
+			}
+		} else {
+			/* Check if vasip clk is disabled, if yes enable it */
+			addr = ioctrl_addr;
+			dhd_sbreg_op(dhd, addr, &val, TRUE);
+			if (!val) {
+				val = 1;
+				dhd_sbreg_op(dhd, addr, &val, FALSE);
+			}
+
+			addr = addr_reg;
+			/* Read 4 bytes at once and loop for fifo_size / 4 */
+			for (i = 0; i < fifo_size / 4; i++, addr += 4) {
+				if (sdio_backplane_access(dhd->bus, addr, sizeof(uint),
+					&val, TRUE) != BCME_OK) {
+					DHD_ERROR(("%s: Invalid uint addr: 0x%x \n", __FUNCTION__,
+						addr));
+					return BCME_ERROR;
+				}
+				buf[i] = val;
+				OSL_DELAY(1);
+			}
+		}
+	} else {
+		uint cur_coreid;
+		uint chipc_corerev;
+		chipcregs_t *chipcregs;
+
+		/* Save the current core */
+		cur_coreid = si_coreid(sih);
+
+		/* Switch to ChipC */
+		chipcregs = (chipcregs_t *)si_setcore(sih, CC_CORE_ID, 0);
+		if (!chipcregs) {
+			DHD_ERROR(("%s: si_setcore returns NULL for core id %u \n",
+				__FUNCTION__, CC_CORE_ID));
+			return BCME_ERROR;
+		}
+
+		chipc_corerev = si_corerev(sih);
+
+		if ((chipc_corerev == 64) || (chipc_corerev == 65) || (chipc_corerev == 128)) {
+			W_REG(si_osh(sih), &chipcregs->sr_memrw_addr, 0);
+
+			/* Read 4 bytes at once and loop for fifo_size / 4 */
+			for (i = 0; i < fifo_size / 4; i++) {
+				buf[i] = R_REG(si_osh(sih), &chipcregs->sr_memrw_data);
+				OSL_DELAY(1);
+			}
+		}
+
+		/* Switch back to the original core */
+		si_setcore(sih, cur_coreid, 0);
+	}
+
+	return BCME_OK;
+}
+
+#ifdef DHD_SSSR_DUMP_BEFORE_SR
+static int
+dhdsdio_sssr_dump_get_before_sr(dhd_pub_t *dhd)
+{
+	int i;
+	uint32 sr_size, xmtaddress, xmtdata, dig_buf_size, dig_buf_addr;
+	uint8 num_d11cores;
+
+	DHD_ERROR(("%s\n", __FUNCTION__));
+
+	num_d11cores = dhd_d11_slices_num_get(dhd);
+
+	for (i = 0; i < num_d11cores; i++) {
+		if (dhd->sssr_d11_outofreset[i]) {
+			sr_size = dhd_sssr_mac_buf_size(dhd, i);
+			xmtaddress = dhd_sssr_mac_xmtaddress(dhd, i);
+			xmtdata = dhd_sssr_mac_xmtdata(dhd, i);
+			dhdsdio_get_sssr_fifo_dump(dhd, dhd->sssr_d11_before[i],
+					sr_size, xmtaddress, xmtdata);
+		}
+	}
+
+	dig_buf_size = dhd_sssr_dig_buf_size(dhd);
+	dig_buf_addr = dhd_sssr_dig_buf_addr(dhd);
+	if (dig_buf_size) {
+		dhdsdio_get_sssr_dig_dump(dhd, dhd->sssr_dig_buf_before,
+				dig_buf_size, dig_buf_addr);
+	}
+
+	return BCME_OK;
+}
+#endif /* DHD_SSSR_DUMP_BEFORE_SR */
+
+static int
+dhdsdio_sssr_dump_get_after_sr(dhd_pub_t *dhd)
+{
+	int i;
+	int err;
+	uint32 sr_size, xmtaddress, xmtdata, dig_buf_size, dig_buf_addr;
+	uint8 num_d11cores;
+
+	DHD_ERROR(("%s\n", __FUNCTION__));
+
+	num_d11cores = dhd_d11_slices_num_get(dhd);
+
+	for (i = 0; i < num_d11cores; i++) {
+		if (dhd->sssr_d11_outofreset[i]) {
+			sr_size = dhd_sssr_mac_buf_size(dhd, i);
+			xmtaddress = dhd_sssr_mac_xmtaddress(dhd, i);
+			xmtdata = dhd_sssr_mac_xmtdata(dhd, i);
+			err = dhdsdio_get_sssr_fifo_dump(dhd, dhd->sssr_d11_after[i],
+					sr_size, xmtaddress, xmtdata);
+			if (err != BCME_OK) {
+				DHD_ERROR(("%s: fifo dump failed for d11core=%d\n",
+					__FUNCTION__, i));
+				return err;
+			}
+		}
+	}
+
+	dig_buf_size = dhd_sssr_dig_buf_size(dhd);
+	dig_buf_addr = dhd_sssr_dig_buf_addr(dhd);
+
+	if (dig_buf_size) {
+		err = dhdsdio_get_sssr_dig_dump(dhd, dhd->sssr_dig_buf_after,
+			dig_buf_size, dig_buf_addr);
+		if (err != BCME_OK) {
+			DHD_ERROR(("%s: dig dump failed\n", __FUNCTION__));
+			return err;
+		}
+	}
+
+	return BCME_OK;
+}
+
+static int
+dhdsdio_sssr_wait_for_backplane_ready(dhd_pub_t *dhd)
+{
+	int i;
+	int retry;
+	uint addr = 0;
+	uint val = 0;
+	uint8 num_d11cores;
+	bool has_probe_addr = FALSE;
+
+	num_d11cores = dhd_d11_slices_num_get(dhd);
+	for (i = 0; i < num_d11cores; i++) {
+		if (dhd->sssr_d11_outofreset[i]) {
+			addr = dhd_sssr_mac_xmtdata(dhd, i);
+			has_probe_addr = TRUE;
+			break;
+		}
+	}
+
+	if (!has_probe_addr) {
+		addr = dhd_sssr_dig_buf_addr(dhd);
+		has_probe_addr = (addr != 0);
+	}
+
+	if (!has_probe_addr) {
+		DHD_ERROR(("%s: no probe address, skip readiness check\n", __FUNCTION__));
+		return BCME_OK;
+	}
+
+	for (retry = 0; retry < 50; retry++) {
+		if (sdio_backplane_access(dhd->bus, addr, sizeof(uint), &val, TRUE) == BCME_OK) {
+			if (retry) {
+				DHD_ERROR(("%s: backplane ready after retry=%d addr=0x%x\n",
+					__FUNCTION__, retry, addr));
+			}
+			return BCME_OK;
+		}
+
+		if ((retry % 10) == 0) {
+			DHD_ERROR(("%s: waiting for backplane retry=%d addr=0x%x\n",
+				__FUNCTION__, retry, addr));
+		}
+		OSL_DELAY(100);
+	}
+
+	DHD_ERROR(("%s: backplane not ready addr=0x%x\n", __FUNCTION__, addr));
+	return BCME_ERROR;
+}
+
+int
+dhd_bus_fis_dump(dhd_pub_t *dhd)
+{
+	return 0;
+}
+
+static int
+dhdsdio_fis_trigger(dhd_pub_t *dhd)
+{
+	return 0;
+}
+
+int
+dhd_bus_fis_trigger(dhd_pub_t *dhd)
+{
+	return dhdsdio_fis_trigger(dhd);
+}
+void
+dhdsdio_sr_happened(dhd_pub_t *dhd, bool set)
+{
+	uint addrd = DHD_SDIO_SR_HAPPENED_DIGITAL_REG;
+	uint addrm = DHD_SDIO_SR_HAPPENED_MAIN_REG;
+
+	uint vald = 0;
+	uint valm = 0;
+
+	if (set) {
+		vald = 1;
+		valm = 1;
+		DHD_ERROR(("SYNA_DBG: Writing sbreg: addrd:0x%x addrm:0x%x "
+			"vald:0x%x valm:0x%x\n", addrd, addrm, vald, valm));
+		dhd_sbreg_op(dhd, addrd, &vald, FALSE);
+		dhd_sbreg_op(dhd, addrm, &valm, FALSE);
+	} else {
+		dhd_sbreg_op(dhd, addrd, &vald, TRUE);
+		dhd_sbreg_op(dhd, addrm, &valm, TRUE);
+		DHD_ERROR(("SYNA_DBG: Read sbreg: addrd:0x%x addrm:0x%x "
+			"vald:0x%x valm:0x%x\n", addrd, addrm, vald, valm));
+	}
+}
+static void
+dhdsdio_sssr_presleep_regseq_5312(dhd_pub_t *dhd)
+{
+	uint val;
+
+	if (!BCM5312_CHIP(dhd->bus->sih->chip)) {
+		return;
+	}
+
+	DHD_ERROR(("%s: applying BCM5312 pre-sleep sbreg sequence\n", __FUNCTION__));
+
+	val = 0x060041ff;
+	dhd_sbreg_op(dhd, 0x18012618, &val, FALSE);
+
+	val = 0x40000000;
+	dhd_sbreg_op(dhd, 0x1801001c, &val, FALSE);
+
+	val = 0x40000000;
+	dhd_sbreg_op(dhd, 0x18010018, &val, FALSE);
+
+	val = 0x2;
+	dhd_sbreg_op(dhd, 0x18012760, &val, FALSE);
+
+	val = 0x00100000;
+	dhd_sbreg_op(dhd, 0x18012700, &val, FALSE);
+
+	val = 0x0164ffff;
+	dhd_sbreg_op(dhd, 0x18012770, &val, FALSE);
+}
+
+static void
+dhdsdio_sssr_prepare_sleep_crash(dhd_pub_t *dhd)
+{
+	dhd_bus_t *bus = dhd->bus;
+	uint txq_pkts;
+
+	if (!dhd->collect_sssr) {
+		return;
+	}
+
+	txq_pkts = pktq_n_pkts_tot(&bus->txq);
+	if (txq_pkts != 0) {
+		DHD_ERROR(("%s: crash sleep prep flushing txq=%u\n", __FUNCTION__, txq_pkts));
+		dhd_bus_pktq_flush(dhd);
+	}
+
+	bus->dpc_sched = FALSE;
+	bus->rxskip = FALSE;
+	bus->readframes = FALSE;
+	bus->ctrl_frame_stat = FALSE;
+	bus->ipend = 0;
+	bus->intstatus = 0;
+
+	DHD_ERROR(("%s: crash sleep prep done dpc=%d rxskip=%d readframes=%d "
+		"ctrl=%d ipend=0x%x intstatus=0x%x txq=%u\n",
+		__FUNCTION__, bus->dpc_sched, bus->rxskip, bus->readframes,
+		bus->ctrl_frame_stat, bus->ipend, bus->intstatus,
+		pktq_n_pkts_tot(&bus->txq)));
+}
+
+int
+dhdsdio_sssr_dump(dhd_pub_t *dhd)
+{
+	uint32 powerctrl_val;
+	int sleep_err;
+	int resume_err;
+	uint32 sleep_retry;
+	uint32 resume_retry;
+
+	if (!dhd->sssr_inited) {
+		return BCME_ERROR;
+	}
+
+	if (dhd->bus->is_linkdown) {
+		DHD_ERROR(("%s: SDIO link is down\n", __FUNCTION__));
+		return BCME_ERROR;
+	}
+
+	if ((BCM4612_CHIP(dhd->bus->sih->chip) || BCM5312_CHIP(dhd->bus->sih->chip))) {
+		dhd->bus->_srenab = FALSE;
+		dhd->bus->_slpauto = FALSE;
+		dhdsdio_bussleep(dhd->bus, FALSE);
+	}
+
+	dhd_os_wd_timer(dhd, 0);
+	dhd->dhd_console_ms = 0;
+
+	dhdsdio_sr_happened(dhd, TRUE);
+
+	DHD_ERROR(("%s: Before WL down (powerctl: sdio:0x%x chipc:0x%x) "
+				"PMU rctl:0x%x res_state:0x%x\n", __FUNCTION__,
+				si_corereg(dhd->bus->sih, dhd->bus->sih->buscoreidx,
+					OFFSETOF(chipcregs_t, powerctl), 0, 0),
+				si_corereg(dhd->bus->sih, 0, OFFSETOF(chipcregs_t, powerctl), 0, 0),
+				PMU_REG(dhd->bus->sih, retention_ctl, 0, 0),
+				PMU_REG(dhd->bus->sih, res_state, 0, 0)));
+	dhdsdio_d11_check_outofreset(dhd);
+
+#ifdef DHD_SSSR_DUMP_BEFORE_SR
+	DHD_ERROR(("%s: Collecting Dump before SR\n", __FUNCTION__));
+	if (dhdsdio_sssr_dump_get_before_sr(dhd) != BCME_OK) {
+		DHD_ERROR(("%s: dhdsdio_sssr_dump_get_before_sr failed\n", __FUNCTION__));
+		return BCME_ERROR;
+	}
+#endif /* DHD_SSSR_DUMP_BEFORE_SR */
+
+	dhdsdio_clear_intmask_and_timer(dhd);
+	dhdsdio_clear_clk_req(dhd);
+	powerctrl_val = dhdsdio_suspend_chipcommon_powerctrl(dhd);
+
+	if ((BCM4612_CHIP(dhd->bus->sih->chip) || BCM5312_CHIP(dhd->bus->sih->chip))) {
+		dhd->bus->_srenab = TRUE;
+		dhd->bus->_slpauto = TRUE;
+		dhdsdio_sssr_presleep_regseq_5312(dhd);
+		dhdsdio_sssr_prepare_sleep_crash(dhd);
+
+		sleep_retry = 0;
+		do {
+			/*
+			 * SR path can leave dpc/ipend asserted even when there is no real
+			 * RX/TX/control work pending; clear stale state before sleep retry.
+			 */
+			if (dhd->bus->dpc_sched && !dhd->bus->rxskip &&
+				(pktq_n_pkts_tot(&dhd->bus->txq) == 0) &&
+				!dhd->bus->readframes && !dhd->bus->ctrl_frame_stat) {
+				if ((sleep_retry % 20) == 0) {
+					DHD_ERROR(("%s: clearing stale dpc pending "
+						"before sleep (retry=%u)\n",
+						__FUNCTION__, sleep_retry));
+				}
+				dhd->bus->dpc_sched = FALSE;
+				dhd->bus->ipend = 0;
+				dhd->bus->intstatus = 0;
+			}
+
+			sleep_err = dhdsdio_bussleep(dhd->bus, TRUE);
+			if (sleep_err != BCME_OK) {
+				if (sleep_err == BCME_BUSY) {
+					dhdsdio_sssr_prepare_sleep_crash(dhd);
+				}
+				if ((sleep_retry % 20) == 0) {
+					DHD_ERROR(("%s: sleep trigger retry=%u err=%d "
+						"sleeping=%d dpc=%d ipend=0x%x "
+						"intstatus=0x%x txq=%u\n",
+						__FUNCTION__, sleep_retry, sleep_err, dhd->bus->sleeping,
+						dhd->bus->dpc_sched, dhd->bus->ipend, dhd->bus->intstatus,
+						pktq_n_pkts_tot(&dhd->bus->txq)));
+				}
+				OSL_DELAY(1000);
+			}
+		} while ((sleep_err != BCME_OK) && (++sleep_retry < 200));
+
+		if (sleep_err != BCME_OK) {
+			DHD_ERROR(("%s: sleep trigger failed err=%d retry=%u\n",
+				__FUNCTION__, sleep_err, sleep_retry));
+			return sleep_err;
+		}
+
+		DHD_ERROR(("%s: sleep trigger accepted sleeping=%d retry=%u\n",
+			__FUNCTION__, dhd->bus->sleeping, sleep_retry));
+	}
+
+	if (g_assert_type == 301) {
+		uint32 assert_wait = 0;
+		DHD_ERROR(("%s: hold requested, waiting while g_assert_type=301\n",
+			__FUNCTION__));
+		while (g_assert_type == 301) {
+			if ((assert_wait % 100) == 0) {
+				DHD_ERROR(("%s: hold wait=%u g_assert_type=%u\n",
+					__FUNCTION__, assert_wait, g_assert_type));
+			}
+			CAN_SLEEP() ? OSL_SLEEP(10) : OSL_DELAY(10000);
+			assert_wait++;
+		}
+		DHD_ERROR(("%s: hold released, g_assert_type=%u\n",
+			__FUNCTION__, g_assert_type));
+	}
+
+	/* Wait for some time before Restore */
+	OSL_DELAY(20000);
+
+	if ((BCM4612_CHIP(dhd->bus->sih->chip) || BCM5312_CHIP(dhd->bus->sih->chip))) {
+		DHD_ERROR(("%s: WL-down phase complete; starting resume wake-up\n", __FUNCTION__));
+
+		resume_retry = 0;
+		do {
+			resume_err = dhdsdio_bussleep(dhd->bus, FALSE);
+			if (resume_err != BCME_OK) {
+				if ((resume_retry % 20) == 0) {
+					DHD_ERROR(("%s: wake before resume retry=%u "
+						"err=%d sleeping=%d\n",
+						__FUNCTION__, resume_retry, resume_err, dhd->bus->sleeping));
+				}
+				OSL_DELAY(1000);
+			}
+		} while ((resume_err != BCME_OK) && (++resume_retry < 200));
+
+		if (resume_err != BCME_OK) {
+			DHD_ERROR(("%s: wake before resume failed err=%d retry=%u\n",
+				__FUNCTION__, resume_err, resume_retry));
+			return resume_err;
+		}
+
+		DHD_ERROR(("%s: wake before resume accepted sleeping=%d retry=%u\n",
+			__FUNCTION__, dhd->bus->sleeping, resume_retry));
+	}
+
+	DHD_ERROR(("%s: After WL down (powerctl: sdio:0x%x chipc:0x%x) "
+				"PMU rctl:0x%x res_state:0x%x\n", __FUNCTION__,
+				si_corereg(dhd->bus->sih, dhd->bus->sih->buscoreidx,
+					OFFSETOF(chipcregs_t, powerctl), 0, 0),
+				si_corereg(dhd->bus->sih, 0, OFFSETOF(chipcregs_t, powerctl), 0, 0),
+				PMU_REG(dhd->bus->sih, retention_ctl, 0, 0),
+				PMU_REG(dhd->bus->sih, res_state, 0, 0)));
+
+	if (dhdsdio_resume_chipcommon_powerctrl(dhd, powerctrl_val) != BCME_OK) {
+		DHD_ERROR(("%s: dhdsdio_resume_chipcommon_powerctrl failed\n", __FUNCTION__));
+		return BCME_ERROR;
+	}
+	if (dhdsdio_arm_resume_clk_req(dhd) != BCME_OK) {
+		DHD_ERROR(("%s: dhdsdio_arm_resume_clk_req failed\n", __FUNCTION__));
+		return BCME_ERROR;
+	}
+	if (dhdsdio_bring_d11_outofreset(dhd) != BCME_OK) {
+		DHD_ERROR(("%s: dhdsdio_bring_d11_outofreset failed\n", __FUNCTION__));
+		return BCME_ERROR;
+	}
+	if (dhdsdio_sssr_wait_for_backplane_ready(dhd) != BCME_OK) {
+		DHD_ERROR(("%s: backplane readiness check failed\n", __FUNCTION__));
+		return BCME_ERROR;
+	}
+
+	DHD_ERROR(("%s: Collecting Dump after SR\n", __FUNCTION__));
+	if (dhdsdio_sssr_dump_get_after_sr(dhd) != BCME_OK) {
+		DHD_ERROR(("%s: dhdsdio_sssr_dump_get_after_sr failed\n", __FUNCTION__));
+		return BCME_ERROR;
+	}
+	dhdsdio_sr_happened(dhd, FALSE);
+	dhd->sssr_dump_collected = TRUE;
+	dhd_write_sssr_dump(dhd, SSSR_DUMP_MODE_SSSR);
+
+	return BCME_OK;
+}
+#endif /* DHD_SSSR_DUMP */
+
 extern int
 dhd_bus_console_in(dhd_pub_t *dhdp, uchar *msg, uint msglen)
 {
@@ -10796,6 +12056,8 @@ dhd_bus_download_firmware(struct dhd_bus *bus, osl_t *osh, char *pfw_path,
 
 #if defined(DHD_AUTOSEL_BINARY_FILENAME)
 	dhd_autosel_fwnv_name(bus->dhd, bus->fw_path, bus->nv_path, bus->fwsig_filename);
+	DHD_ERROR(("%s: firmware path=%s, nvram path=%s\n",
+			__FUNCTION__, bus->fw_path, bus->nv_path));
 #endif /* DHD_AUTOSEL_BINARY_FILENAME */
 
 	ret = dhdsdio_download_firmware(bus, osh, bus->sdh);

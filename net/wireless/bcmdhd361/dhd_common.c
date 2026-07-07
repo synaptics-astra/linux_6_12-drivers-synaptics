@@ -958,7 +958,7 @@ dhd_sssr_reg_info_deinit(dhd_pub_t *dhd)
 	}
 }
 
-#ifdef DHD_PCIE_REG_ACCESS
+#if defined(BCMPCIE) || defined(BCMSDIO)
 static void
 dhd_dump_sssr_reg_info_v2(dhd_pub_t *dhd)
 {
@@ -1107,13 +1107,12 @@ dhd_dump_sssr_reg_info_v1(dhd_pub_t *dhd)
 		DHD_ERROR(("sr_size=0x%x\n", sssr_reg_info->mac_regs[i].sr_size));
 	}
 }
-
-#endif /* DHD_PCIE_REG_ACCESS */
+#endif /* BCMPCIE || BCMSDIO */
 
 static void
 dhd_dump_sssr_reg_info(dhd_pub_t *dhd)
 {
-#ifdef DHD_PCIE_REG_ACCESS
+#if defined(BCMPCIE) || defined(BCMSDIO)
 	sssr_reg_info_cmn_t *sssr_reg_info_cmn = dhd->sssr_reg_info;
 	sssr_reg_info_v1_t *sssr_reg_info = (sssr_reg_info_v1_t *)&sssr_reg_info_cmn->rev1;
 
@@ -1134,7 +1133,14 @@ dhd_dump_sssr_reg_info(dhd_pub_t *dhd)
 #endif /* DHD_PCIE_REG_ACCESS */
 }
 
+uint8 dhd_d11_slices_num_get(dhd_pub_t *);
+#if defined(DHD_SSSR_DUMP)
+int dhd_bus_fis_dump(dhd_pub_t *);
+int dhd_bus_fis_trigger(dhd_pub_t *);
+#endif /* DHD_SSSR_DUMP */
+#ifdef BCMPCIE
 void dhdpcie_fill_sssr_reg_info(dhd_pub_t *dhd);
+#endif /* BCMPCIE */
 
 static int
 dhd_get_sssr_reg_info(dhd_pub_t *dhd)
@@ -1142,7 +1148,9 @@ dhd_get_sssr_reg_info(dhd_pub_t *dhd)
 	int ret;
 
 	if (dhd->force_sssr_init) {
+#ifdef BCMPCIE
 		dhdpcie_fill_sssr_reg_info(dhd);
+#endif /* BCMPCIE */
 		dhd->force_sssr_init = FALSE;
 		goto done;
 	}
@@ -13338,6 +13346,7 @@ static chip_name_map_t chip_name_map[] = {
 	{BCM43756_CHIP_ID, 0x6, "fw_bcm43756e_wfb.bin","bcmdhd_43756e.cal",    "bcmdhd_clm_43756e.blob", NULL},
 #endif /* !DHD_WFB */
 #else
+#ifndef DHD_WFB
 #ifndef DHD_ASTRA_CUST_CHIP_SUPPORT
 	{BCM43752_CHIP_ID, 0x2, "fw_sd_bcm43752.bin",  "bcmdhd_sd_43752.cal",  "bcmdhd_clm_43752.blob",  NULL},
 	{BCM43756_CHIP_ID, 0x4, "fw_sd_bcm43756.bin",  "bcmdhd_sd_43756.cal",  "bcmdhd_clm_43756.blob",  NULL},
@@ -13349,7 +13358,10 @@ static chip_name_map_t chip_name_map[] = {
 	{BCM4612_CHIP_ID,  0x2, "fw_sd_bcm4612a2.bin", "bcmdhd_sd_4612.cal",   "bcmdhd_clm_4612.blob",   NULL},
 	{BCM4612_CHIP_ID,  0x3, "fw_sd_bcm4612a3.bin", "bcmdhd_sd_4612.cal",   "bcmdhd_clm_4612.blob",   NULL},
 	{BCM4612_CHIP_ID,  0x4, "fw_sd_bcm4612a4.bin", "bcmdhd_sd_4612.cal",   "bcmdhd_clm_4612.blob",   NULL},
-#endif /* !BCMSDIO */
+#else
+	{BCM43756_CHIP_ID, 0x6, "fw_sd_bcm43756e_wfb.bin","bcmdhd_43756e.cal", "bcmdhd_clm_43756e.blob", NULL},
+#endif /* !DHD_WFB */
+#endif /*BCMSDIO*/
 };
 
 int dhd_autosel_fwnv_name(dhd_pub_t *dhd, char *fw_path, char *nv_path, char* sig_cert_path)

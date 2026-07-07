@@ -439,7 +439,8 @@ akm_suites_station[] = {
 	WLAN_AKM_SUITE_FT_FILS_SHA256,
 	WLAN_AKM_SUITE_FT_FILS_SHA384,
 	WLAN_AKM_SUITE_OWE,
-	WLAN_AKM_SUITE_DPP
+	WLAN_AKM_SUITE_DPP,
+	WLAN_AKM_SUITE_SAE_EXT_PSK
 };
 
 static const uint32
@@ -1470,6 +1471,7 @@ static const rsn_akm_wpa_auth_entry_t rsn_akm_wpa_auth_lookup_tbl[] = {
 
 #if defined(WL_SAE) || defined(WL_CLIENT_SAE)
 	{WLAN_AKM_SUITE_SAE, WPA3_AUTH_SAE_PSK},
+	{WLAN_AKM_SUITE_SAE_EXT_PSK, WPA3_AUTH_SAE_EXT_PSK},
 #endif /* WL_SAE || WL_CLIENT_SAE */
 #ifdef WL_SAE_FT
 	{WLAN_AKM_SUITE_FT_OVER_SAE, WPA3_AUTH_SAE_PSK | WPA2_AUTH_FT},
@@ -5808,6 +5810,10 @@ wl_find_multiakm_combo_tuples(u32 multi_akm_auth)
 {
 	u8 num_tuples = 0;
 
+	if (multi_akm_auth & WPA3_AUTH_SAE_EXT_PSK) {
+		num_tuples++;
+	}
+
 	if (multi_akm_auth & WPA3_AUTH_SAE_PSK) {
 		num_tuples++;
 	}
@@ -5882,6 +5888,12 @@ wl_update_join_pref_tuple(u32 multi_akm, uint8 **pref,
 	} else {
 		// mcast cipher will be chosen by fw
 		// The 1st tuple is lowest priority
+
+		if (multi_akm & WPA3_AUTH_SAE_EXT_PSK) {
+			wl_prepare_joinpref_tuples(pref, WLAN_AKM_SUITE_SAE_EXT_PSK,
+				CRYPTO_ALGO_NONE, CRYPTO_ALGO_NONE);
+		}
+
 		if (multi_akm & WPA2_AUTH_PSK_SHA256) {
 			wl_prepare_joinpref_tuples(pref, WLAN_AKM_SUITE_PSK_SHA256,
 				WLAN_CIPHER_SUITE_CCMP, CRYPTO_ALGO_NONE);
@@ -6084,6 +6096,7 @@ wl_set_key_mgmt(struct net_device *dev, struct cfg80211_connect_params *sme,
 #endif /* WL_OWE */
 #if defined(WL_SAE) || defined(WL_CLIENT_SAE)
 				case WLAN_AKM_SUITE_SAE:
+				case WLAN_AKM_SUITE_SAE_EXT_PSK:
 #endif /* WL_SAE || WL_CLIENT_SAE */
 #ifdef WL_SAE_FT
 				case WLAN_AKM_SUITE_FT_OVER_SAE:

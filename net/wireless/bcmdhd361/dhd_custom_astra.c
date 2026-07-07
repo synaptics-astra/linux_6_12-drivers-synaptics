@@ -94,7 +94,11 @@ extern void *dhd_wlan_mem_prealloc(int section, unsigned long size);
 #define WLAN_HOST_WAKE_GPIO		493
 
 static int wlan_reg_on = -1;
+
+#ifndef DHD_DT_COMPAT_ENTRY
 #define DHD_DT_COMPAT_ENTRY		"synaptics,bcmdhd_wlan"
+#endif /* DHD_DT_COMPAT_ENTRY */
+
 #define WIFI_WL_REG_ON_PROPNAME		"wl_reg_on"
 
 static int wlan_host_wake_up = -1;
@@ -544,3 +548,56 @@ dhd_wlan_deinit(void)
 /* Required only for Built-in DHD */
 device_initcall(dhd_wlan_init);
 #endif /* BOARD_HIKEY_MODULAR */
+
+#ifdef DHD_RELOAD_SDIO
+int dhd_wlregon_toggle_sequence(void)
+{
+	int ret;
+	int gpio;
+	struct device_node *wlan_np = of_find_compatible_node(
+		NULL, NULL, DHD_DT_COMPAT_ENTRY);
+
+	if (!wlan_np)
+	{
+		DHD_ERROR(("%s: wlan dev NULL %d\n",
+				__FUNCTION__, 0x1));
+		return -EINVAL;
+	}
+
+	gpio = of_get_named_gpio(wlan_np, "wl_reg_on", 0);
+	if (!gpio_is_valid(gpio))
+	{
+		DHD_ERROR(("%s: gpio error %d\n",
+				__FUNCTION__, 0x2));
+		return gpio < 0 ? gpio : -EINVAL;
+	}
+
+	ret = gpio_request(gpio, "wl_reg_on");
+	if (ret)
+	{
+		DHD_ERROR(("%s: gpio error %d\n",
+				__FUNCTION__, 0x3));
+		return ret;
+	}
+
+	ret = gpio_direction_output(gpio, 0);
+
+	if (ret) {
+		gpio_free(gpio);
+		return ret;
+	}
+
+	DHD_TRACE(("%s: gpio toggle %d\n",
+				__FUNCTION__, gpio));
+
+	gpio_set_value_cansleep(gpio, 1);
+	msleep(1000);
+	gpio_set_value_cansleep(gpio, 0);
+	msleep(1000);
+	gpio_set_value_cansleep(gpio, 1);
+	msleep(200);
+
+	gpio_free(gpio);
+	return BCME_OK;
+}
+#endif /* DHD_RELOAD_SDIO */

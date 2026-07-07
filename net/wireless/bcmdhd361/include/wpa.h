@@ -198,6 +198,7 @@ typedef BWL_PRE_PACKED_STRUCT struct
 			(akm) == RSN_AKM_SHA256_1X || \
 			(akm) == RSN_AKM_SHA256_PSK || \
 			(akm) == RSN_AKM_TPK || \
+			(akm) == RSN_AKM_SAE_EXT_PSK || \
 			(akm) == RSN_AKM_SAE_PSK || \
 			(akm) == RSN_AKM_SAE_FBT || \
 			(akm) == RSN_AKM_FILS_SHA256 || \
