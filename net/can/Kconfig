@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# PHY Layer Configuration
+#
+
+if CAN_DEV
+
+config CAN_ARASAN
+	tristate "Arasan CANFD"
+	depends on COMMON_CLK && HAS_IOMEM
+	help
+	  Arasan CANFD driver. This driver supports Arasan CANFD IP.
+
+endif #CAN_DEV

@@ -5,4 +5,4 @@
 # Networking Core Drivers
 #
 
-obj-$(CONFIG_SYNAPTICS_NET) += phy/ mdio/ wireless/ dsa/ ethernet/
+obj-$(CONFIG_SYNAPTICS_NET) += phy/ mdio/ can/ wireless/ dsa/ ethernet/
