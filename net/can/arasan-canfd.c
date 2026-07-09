@@ -97,6 +97,7 @@
 #define CAN_MAX_TX_QUEUE		8
 #define CAN_MAX_FILTER			255
 #define ARASAN_CANFD_NAPI_WEIGHT	8
+#define DEFAULT_SSP			17
 
 #define TX_HEADER0_ID			GENMASK(22, 12)
 #define TX_HEADER0_ESI			BIT(24)
@@ -934,6 +935,8 @@ static int arasan_canfd_probe(struct platform_device *pdev)
 	}
 
 	of_property_read_u32(pdev->dev.of_node, "arasan,ssp", &priv->ssp);
+	if (!priv->ssp)
+		priv->ssp = DEFAULT_SSP;
 
 	transceiver = devm_phy_optional_get(&pdev->dev, NULL);
 	if (IS_ERR(transceiver)) {
