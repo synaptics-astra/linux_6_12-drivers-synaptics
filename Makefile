@@ -73,4 +73,6 @@ obj-$(CONFIG_SYNAPTICS_RPMSG)		+= rpmsg/
 
 obj-$(CONFIG_SYNAPTICS_HRX_V4L2)	+= hrx-v4l2/
 
+obj-y	+= drm/
+
 obj-$(CONFIG_SYNAPTICS_CRYPTO)	+= crypto/

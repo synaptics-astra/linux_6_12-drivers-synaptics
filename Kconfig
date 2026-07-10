@@ -77,6 +77,8 @@ source "drivers/synaptics/hrx-v4l2/Kconfig"
 
 source "drivers/synaptics/gpu/Kconfig"
 
+source "drivers/synaptics/drm/Kconfig"
+
 source "drivers/synaptics/crypto/Kconfig"
 
 endmenu
