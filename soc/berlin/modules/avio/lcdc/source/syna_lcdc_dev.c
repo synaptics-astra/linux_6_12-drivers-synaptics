@@ -11,8 +11,8 @@
 #include "syna_lcdc_dev.h"
 #include "avio_io.h"
 #include "vpp_api.h"
-
 #include "drv_lcdc.h"
+#include "rpmsg_client_disp.h"
 
 struct syna_lcdc_dev *syna_lcdc[SYNA_LCDC_MAX];
 
@@ -435,6 +435,18 @@ static void syna_lcdc_set_gamma(struct syna_lcdc_dev *dev)
 	}
 }
 
+static void syna_lcdc_send_rpmsg(SYNA_LCDC_PANEL *panelcfg)
+{
+	rpmsg_disp_cfg_msg_t disp_cfg = {0};
+
+	disp_cfg.msg_type = RPMSG_DISP_MSG_CONFIG;
+	disp_cfg.xres = panelcfg->xres;
+	disp_cfg.yres = panelcfg->yres;
+	disp_cfg.orientation = 0; /* Reserved for future feature addition. */
+
+	rpmsg_disp_send_msg(&disp_cfg);
+}
+
 void syna_lcdc_hw_config(int lcdcID, SYNA_LCDC_PANEL *panelcfg)
 {
 	avio_fastlogo_info display_info;
@@ -471,6 +483,7 @@ void syna_lcdc_hw_config(int lcdcID, SYNA_LCDC_PANEL *panelcfg)
 			GA_REG_WORD32_WRITE(syna_lcdc[lcdcID]->core_addr + LCDC_REG_INTER, INT_FRAME_DONE);
 		}
 
+		syna_lcdc_send_rpmsg(panelcfg);
 		syna_lcdc_semaintr_enable(syna_lcdc[lcdcID]->intrID, 1);
 	}
 }
@@ -563,6 +576,7 @@ static int syna_lcdc_dev_init(void)
 static int drv_lcdc_init(void *ctxt)
 {
 	LCDC_CTX    *pLCDC_Ctxt = ctxt;
+	int ret;
 
 	avio_trace("%s:%d:\n", __func__, __LINE__);
 
@@ -573,15 +587,26 @@ static int drv_lcdc_init(void *ctxt)
 	}
 
 	pLCDC_Ctxt->vpp_mem_lcdc_list->dev = pLCDC_Ctxt->dev;
-	VPP_MEM_InitMemory(pLCDC_Ctxt->vpp_mem_lcdc_list);
 
-	return syna_lcdc_dev_init();
+	ret = rpmsg_disp_client_register();
+	if (ret) {
+		avio_error("failed to register display RPMsg client: %d\n", ret);
+	} else {
+		VPP_MEM_InitMemory(pLCDC_Ctxt->vpp_mem_lcdc_list);
+		ret = syna_lcdc_dev_init();
+		if (ret) {
+			rpmsg_disp_client_unregister();
+			VPP_MEM_DeInitMemory(pLCDC_Ctxt->vpp_mem_lcdc_list); // ← cleanup on failure
+		}
+	}
+	return ret;
 }
 
 static void drv_lcdc_exit(void *ctxt)
 {
 	LCDC_CTX    *pLCDC_Ctxt = ctxt;
 
+	rpmsg_disp_client_unregister();
 	syna_lcdc_dev_deinit();
 	VPP_MEM_DeInitMemory(pLCDC_Ctxt->vpp_mem_lcdc_list);
 }
@@ -622,7 +647,6 @@ int avio_module_drv_lcdc_probe(struct platform_device *dev)
 	return 0;
 }
 
-
 static void syna_lcdc_TG_Reset (struct syna_lcdc_dev *dev)
 {
 	syna_lcdc_write(dev, LCDC_REG_LCDCCR, 0);
@@ -649,8 +673,12 @@ int syna_lcdc_suspend(int enable)
 		if (syna_lcdc[i]->isTGConfig) {
 			if (enable) {
 				syna_lcdc[i]->bcm_enable = 0;
-				syna_lcdc_TG_Reset(syna_lcdc[i]);
-				syna_lcdc_wrap_pll_clk_ctrl(i, !enable);
+
+				/* Only skip TG reset if MCU seamless switch is confirmed working */
+				if (!avio_lcdc_is_lp_enabled()) {
+					syna_lcdc_TG_Reset(syna_lcdc[i]);
+					syna_lcdc_wrap_pll_clk_ctrl(i, !enable);
+				}
 			} else {
 				syna_lcdc_dev_init_clk_intr();
 				syna_lcdc_wrap_pll_clk_ctrl(i, !enable);

@@ -23,6 +23,7 @@
 #include <drm/drm_mipi_dsi.h>
 #include <drm/drm_panel.h>
 
+#include "avio_core.h"
 #include "kernel_compatibility.h"
 #define WS_DSI_DRIVER_NAME "ws-ts-dsi"
 
@@ -323,6 +324,10 @@ static int ws_panel_disable(struct drm_panel *panel)
 {
 	struct ws_panel *ts = panel_to_ts(panel);
 
+	/* If Low power mode supported, Then avoid disable during suspend */
+	if (avio_lcdc_is_lp_enabled() && (pm_suspend_target_state != PM_SUSPEND_ON))
+		return 0;
+
 	ws_panel_i2c_write(ts, 0xad, 0x00);
 
 	return 0;
@@ -397,6 +402,10 @@ static const struct drm_panel_funcs ws_panel_funcs = {
 static int ws_panel_bl_update_status(struct backlight_device *bl)
 {
 	struct ws_panel *ts = bl_get_data(bl);
+
+	/* If Low power mode supported, Then avoid disable backlight during suspend */
+	if (avio_lcdc_is_lp_enabled() && (pm_suspend_target_state != PM_SUSPEND_ON))
+		return 0;
 
 	ws_panel_i2c_write(ts, 0xab, 0xff - backlight_get_brightness(bl));
 	ws_panel_i2c_write(ts, 0xaa, 0x01);

@@ -29,6 +29,10 @@ void dhub2nd_suspend(void *hdl, int enable)
 	const unsigned int aioSramPwrCtrlAddr	= baseAddr + RA_aioGbl_AIO64bDHUB_SRAMPWR + RA_SRAMPWR_ctrl;
 	const unsigned int avioGblCtrlAddr	= baseAddr + RA_vppGbl_CTRL;
 
+	/* Skip power control if seamless switch is confirmed during suspend */
+	if (enable && avio_lcdc_is_lp_enabled())
+		goto skip_power_ctrl_done;
+
 	AVIO_REG_WORD32_READ(vppSramPwrCtrlAddr, &vppSramPwrCtl);
 	AVIO_REG_WORD32_READ(aioSramPwrCtrlAddr, &aioSramPwrCtl);
 	AVIO_REG_WORD32_READ(avioGblCtrlAddr, &avioGblCtrl);
@@ -45,5 +49,7 @@ void dhub2nd_suspend(void *hdl, int enable)
 	AVIO_REG_WORD32_WRITE(vppSramPwrCtrlAddr, vppSramPwrCtl);
 	AVIO_REG_WORD32_WRITE(aioSramPwrCtrlAddr, aioSramPwrCtl);
 	AVIO_REG_WORD32_WRITE(avioGblCtrlAddr, avioGblCtrl);
+
+skip_power_ctrl_done:
 	drv_dhub_suspend_dhub(enable, hDhubCtx);
 }

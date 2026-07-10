@@ -73,11 +73,14 @@ int dsi_host_shutdown(int shutdown)
 	 * during Suspend/Resume.
 	 */
 	if (shutdown) {
-		mipi_dphy_shutdown(&mipi_dev->phy, 1);
-		mipi_dsih_close(mipi_dev);
+		/* If Low-power mode supported, Then skip panel shutdown/close */
+		if (!avio_lcdc_is_lp_enabled()) {
+			mipi_dphy_shutdown(&mipi_dev->phy, 1);
+			mipi_dsih_close(mipi_dev);
 
-		iowrite32(mipi_ctrl_addr, avioGblMipiCtrl  & ~0x03);
-		iowrite32(mipi_sram_addr, mipiSramPwrCtl | 0x7);
+			iowrite32(mipi_ctrl_addr, avioGblMipiCtrl  & ~0x03);
+			iowrite32(mipi_sram_addr, mipiSramPwrCtl | 0x7);
+		}
 	} else {
 		iowrite32(mipi_sram_addr, (mipiSramPwrCtl & ~0x7));
 		iowrite32(mipi_ctrl_addr, (avioGblMipiCtrl | 0x03));

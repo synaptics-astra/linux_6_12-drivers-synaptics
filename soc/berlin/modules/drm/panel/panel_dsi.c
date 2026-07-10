@@ -169,6 +169,10 @@ static int syna_panel_dsi_unprepare(struct drm_panel *panel)
 {
 	int err;
 
+	/* If Low-power mode supported, Then skip panel unprepare */
+	if (avio_lcdc_is_lp_enabled())
+		return 0;
+
 	syna_bridge_disable();
 
 	if (synaPanelInfo.supply) {

@@ -4,6 +4,7 @@ SYNA_DRM_TYPE :=
 
 HEADER_PATH += -I$(srctree)/drivers/synaptics/soc/berlin/modules/avio/vpp \
                -I$(srctree)/drivers/synaptics/soc/berlin/modules/avio/vpp/ca/include/ \
+               -I$(srctree)/drivers/synaptics/soc/berlin/modules/avio/lcdc/rpmsg \
                -I$(srctree)/drivers/synaptics/soc/berlin/modules/avio/common/ \
                -I$(srctree)/drivers/synaptics/soc/berlin/modules/avio/ \
                -I$(srctree)/drivers/synaptics/soc/berlin/modules/avio/include \

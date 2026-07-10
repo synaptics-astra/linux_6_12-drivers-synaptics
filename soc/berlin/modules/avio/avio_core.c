@@ -144,6 +144,38 @@ EXPORT_SYMBOL(avio_module_mipirst_set_gpio_val);
 
 static atomic_t avio_dev_refcnt = ATOMIC_INIT(0);
 
+/**
+ * avio_lcdc_set_lp_enabled - Set low-power display capability status
+ * @enable: true to enable, false to disable
+ *
+ * Called by rpmsg_client_disp to confirms low-power display support.
+ * Thread-safe: uses atomic operations.
+ */
+void avio_lcdc_set_lp_enabled(bool enable)
+{
+	AVIO_CTX *hAvioCtx = AVIO_GET_AVIO_CTX();
+
+	if (hAvioCtx) {
+		atomic_set(&hAvioCtx->low_power_disp_enabled, enable ? 1 : 0);
+		avio_trace("Low-power display: %s\n", enable ? "enabled" : "disabled");
+	}
+}
+EXPORT_SYMBOL(avio_lcdc_set_lp_enabled);
+
+/**
+ * avio_lcdc_is_lp_enabled - Check if low-power display is enabled
+ *
+ * Returns: true if low-power display capability is confirmed, false otherwise
+ * Thread-safe: atomic read only.
+ */
+bool avio_lcdc_is_lp_enabled(void)
+{
+	AVIO_CTX *hAvioCtx = AVIO_GET_AVIO_CTX();
+
+	return hAvioCtx ? atomic_read(&hAvioCtx->low_power_disp_enabled) != 0 : false;
+}
+EXPORT_SYMBOL(avio_lcdc_is_lp_enabled);
+
 static void avio_disable_irq(void)
 {
 	/* disable all enabled interrupt */
@@ -501,6 +533,7 @@ int avio_module_avio_probe(struct platform_device *pdev)
 #endif
 
 	sema_init(&hAvioCtx->resume_sem, 0);
+	atomic_set(&hAvioCtx->low_power_disp_enabled, 0);
 
 	hAvioCtx->pAvioRes = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!hAvioCtx->pAvioRes)

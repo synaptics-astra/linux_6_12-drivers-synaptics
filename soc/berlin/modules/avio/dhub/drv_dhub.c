@@ -243,7 +243,9 @@ static void drv_dhub_disable_irq(void *h_dhub_ctx)
 	DHUB_CONFIG_INFO *p_dhub_cfg;
 	int i;
 
-	wrap_DhubEnableAutoPush(false, false, 0);
+	/* If Low-power mode supported, then avoid auto-push disable */
+	if (!avio_lcdc_is_lp_enabled())
+		wrap_DhubEnableAutoPush(false, false, 0);
 
 	for (i = 0; i < DHUB_ID_MAX; i++) {
 		p_dhub_cfg = Dhub_GetConfigInfo_ByDhubId(i);
@@ -344,7 +346,11 @@ static void drv_dhub_close(void *h_dhub_ctx)
 static int drv_dhub_suspend(void *h_dhub_ctx)
 {
 	avio_trace("%s:%d:\n", __func__, __LINE__);
-	wrap_DhubEnableAutoPush(false, true, 60);
+
+	/* If Low-power mode supported, then avoid auto-push disable */
+	if (!avio_lcdc_is_lp_enabled())
+		wrap_DhubEnableAutoPush(false, true, 60);
+
 	dhub2nd_suspend(h_dhub_ctx, 1);
 
 	return 0;

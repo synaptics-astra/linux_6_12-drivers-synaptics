@@ -6,7 +6,7 @@
 #include <linux/version.h>
 #include <linux/cdev.h>
 #include <linux/device.h>
-
+#include <linux/platform_device.h>
 #include "avio_type.h"
 #include "avio_ioctl.h"
 #include "avio_memmap.h"
@@ -24,6 +24,7 @@ typedef struct _AVIO_CTX_ {
 	unsigned char isTeeEnabled;
 
 	struct semaphore resume_sem;
+	atomic_t low_power_disp_enabled;
 } AVIO_CTX;
 
 struct avio_device_t {
@@ -45,5 +46,9 @@ struct avio_device_t {
 
 int avio_module_avio_probe(struct platform_device *pdev);
 int avio_get_avio_kernel_logo_status(void);
+
+/* Low-power display control APIs */
+void avio_lcdc_set_lp_enabled(bool enable);
+bool avio_lcdc_is_lp_enabled(void);
 
 #endif //_AVIO_DRIVER_H_

@@ -151,6 +151,13 @@ AVIO_VPP_API_OBJS += lcdc/source/syna_lcdc_dev.o
 AVIO_VPP_API_OBJS += lcdc/source/$(SOC_FOLDER)/lcdc_cfg_prv.o
 endif
 
+AVIO_INC_PATH += -I$(AVIO_ABS_PATH)/lcdc/rpmsg
+ifeq ($(CONFIG_AVIO_KLAMATH)$(CONFIG_SYNA_RPMSG),yy)
+AVIO_VPP_API_OBJS += lcdc/rpmsg/rpmsg_client_disp.o
+else
+AVIO_VPP_API_OBJS += lcdc/rpmsg/dummy/rpmsg_client_disp.o
+endif
+
 ###############################################################################
 # VPP : Common code for tz & ntz version
 ###############################################################################
