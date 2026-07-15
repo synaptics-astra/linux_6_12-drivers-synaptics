@@ -28,6 +28,7 @@
 
 #include <drm/drm_connector.h>
 #include <drm/drm_panel.h>
+#include "avio_fl_info.h"
 
 struct ws_touch_panel {
 	struct drm_panel base;
@@ -145,6 +146,8 @@ static int ws_touch_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct ws_touch_panel *p;
+	avio_fastlogo_info display_info;
+	enum gpiod_flags GPIO_ID;
 
 	p = devm_kzalloc(dev, sizeof(*p), GFP_KERNEL);
 	if (!p)
@@ -152,17 +155,23 @@ static int ws_touch_probe(struct platform_device *pdev)
 
 	p->dev = dev;
 
-	p->reset = devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_LOW);
+	display_info = avio_get_fastlogo_status();
+	if (!display_info.u.status)
+		GPIO_ID = GPIOD_OUT_LOW;
+	else
+		GPIO_ID = GPIOD_ASIS;
+
+	p->reset = devm_gpiod_get_optional(dev, "reset", GPIO_ID);
 	if (IS_ERR(p->reset))
 		return dev_err_probe(dev, PTR_ERR(p->reset),
 				     "failed to get reset gpio\n");
 
-	p->iovcc = devm_gpiod_get_optional(dev, "iovcc", GPIOD_OUT_LOW);
+	p->iovcc = devm_gpiod_get_optional(dev, "iovcc", GPIO_ID);
 	if (IS_ERR(p->iovcc))
 		return dev_err_probe(dev, PTR_ERR(p->iovcc),
 				     "failed to get iovcc gpio\n");
 
-	p->avdd = devm_gpiod_get_optional(dev, "avdd", GPIOD_OUT_LOW);
+	p->avdd = devm_gpiod_get_optional(dev, "avdd", GPIO_ID);
 	if (IS_ERR(p->avdd))
 		return dev_err_probe(dev, PTR_ERR(p->avdd),
 				     "failed to get avdd gpio\n");

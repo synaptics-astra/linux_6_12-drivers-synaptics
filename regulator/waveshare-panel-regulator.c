@@ -13,6 +13,7 @@
 #include <linux/regmap.h>
 #include <linux/regulator/driver.h>
 #include <linux/of.h>
+#include "avio_fl_info.h"
 
 /* I2C registers of the microcontroller. */
 #define REG_TP 0x94
@@ -115,6 +116,7 @@ static void waveshare_panel_gpio_set(struct gpio_chip *gc, unsigned int offset,
 {
 	struct waveshare_panel_lcd *state = gpiochip_get_data(gc);
 	u16 last_val;
+	avio_fastlogo_info display_info;
 
 	if (offset >= NUM_GPIO)
 		return;
@@ -129,8 +131,12 @@ static void waveshare_panel_gpio_set(struct gpio_chip *gc, unsigned int offset,
 
 	state->poweron_state = last_val;
 
-	regmap_write(state->regmap, REG_TP, last_val >> 8);
-	regmap_write(state->regmap, REG_LCD, last_val & 0xff);
+	display_info = avio_get_fastlogo_status();
+
+	if (!display_info.u.status) {
+		regmap_write(state->regmap, REG_TP, last_val >> 8);
+		regmap_write(state->regmap, REG_LCD, last_val & 0xff);
+	}
 
 	mutex_unlock(&state->pwr_lock);
 }
@@ -220,6 +226,7 @@ static int waveshare_panel_i2c_probe(struct i2c_client *i2c)
 	struct regmap *regmap;
 	unsigned int data;
 	int ret;
+	avio_fastlogo_info display_info;
 
 	state = devm_kzalloc(&i2c->dev, sizeof(*state), GFP_KERNEL);
 	if (!state)
@@ -254,11 +261,16 @@ static int waveshare_panel_i2c_probe(struct i2c_client *i2c)
 		dev_info(&i2c->dev, "waveshare panel mcu version = 0x%x\n",
 			 data);
 
+	display_info = avio_get_fastlogo_status();
+
 	state->direction_state = 0;
 	state->poweron_state = BIT(9) | BIT(8); // Enable VCC
-	regmap_write(regmap, REG_TP, state->poweron_state >> 8);
-	regmap_write(regmap, REG_LCD, state->poweron_state & 0xff);
-	msleep(20);
+
+	if (!display_info.u.status) {
+		regmap_write(regmap, REG_TP, state->poweron_state >> 8);
+		regmap_write(regmap, REG_LCD, state->poweron_state & 0xff);
+		msleep(20);
+	}
 
 	state->regmap = regmap;
 	state->gc.parent = &i2c->dev;
@@ -281,7 +293,7 @@ static int waveshare_panel_i2c_probe(struct i2c_client *i2c)
 	}
 
 	state->enable =
-		devm_gpiod_get_optional(&i2c->dev, "enable", GPIOD_OUT_LOW);
+		devm_gpiod_get_optional(&i2c->dev, "enable", GPIOD_ASIS);
 	if (IS_ERR(state->enable))
 		return dev_err_probe(&i2c->dev, PTR_ERR(state->enable),
 				     "Couldn't get our enable GPIO\n");
