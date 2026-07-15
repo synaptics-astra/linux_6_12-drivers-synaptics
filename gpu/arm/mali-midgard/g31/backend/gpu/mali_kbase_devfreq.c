@@ -185,6 +185,27 @@ static int kbase_devfreq_target(struct device *dev, unsigned long *target_freq, 
 
 	for (i = 0; i < kbdev->nr_clocks; i++) {
 		if (kbdev->clocks[i]) {
+			if (i == 0 && kbdev->clk_high && kbdev->clk_low) {
+				struct clk *parent;
+
+				if (freqs[i] == kbdev->devfreq_profile.freq_table[0])
+					parent = kbdev->clk_high;
+				else
+					parent = kbdev->clk_low;
+
+				err = clk_set_parent(kbdev->clocks[i], parent);
+				if (err) {
+					dev_err(dev,
+						"Failed to switch GPU parent for %lu Hz: %d\n",
+						freqs[i], err);
+					return err;
+				}
+
+				dev_dbg(dev,
+					"GPU parent switched, target=%lu parent_rate=%lu\n",
+					freqs[i], clk_get_rate(parent));
+			}
+
 			err = clk_set_rate(kbdev->clocks[i], freqs[i]);
 			if (!err) {
 #if IS_ENABLED(CONFIG_REGULATOR)

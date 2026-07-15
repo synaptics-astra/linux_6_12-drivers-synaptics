@@ -1111,6 +1111,8 @@ struct kbase_device {
 	struct reset_control *core_rst;  //Syanptics update:add reset control
 	struct clk *clocks[BASE_MAX_NR_CLOCKS_REGULATORS];
 	unsigned int nr_clocks;
+	struct clk *clk_high;
+	struct clk *clk_low;
 #if IS_ENABLED(CONFIG_REGULATOR)
 	struct regulator *regulators[BASE_MAX_NR_CLOCKS_REGULATORS];
 	unsigned int nr_regulators;

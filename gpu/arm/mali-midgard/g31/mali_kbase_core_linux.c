@@ -4594,7 +4594,7 @@ int power_control_init(struct kbase_device *kbdev)
 	 * Any other error is ignored and the driver will continue
 	 * operating with a partial initialization of clocks.
 	 */
-	for (i = 0; i < BASE_MAX_NR_CLOCKS_REGULATORS; i++) {
+	for (i = 0; i < 1; i++) {
 		kbdev->clocks[i] = of_clk_get(kbdev->dev->of_node, (int)i);
 		if (IS_ERR(kbdev->clocks[i])) {
 			err = PTR_ERR(kbdev->clocks[i]);
@@ -4618,6 +4618,15 @@ int power_control_init(struct kbase_device *kbdev)
 	}
 
 	kbdev->nr_clocks = i;
+
+	kbdev->clk_high = devm_clk_get_optional(kbdev->dev, "clk_high");
+	if (IS_ERR(kbdev->clk_high))
+		kbdev->clk_high = NULL;
+
+	kbdev->clk_low = devm_clk_get_optional(kbdev->dev, "clk_low");
+	if (IS_ERR(kbdev->clk_low))
+		kbdev->clk_low = NULL;
+
 	dev_dbg(&pdev->dev, "Clocks probed: %u\n", kbdev->nr_clocks);
 
 	/* Any error in parsing the OPP table from the device file
