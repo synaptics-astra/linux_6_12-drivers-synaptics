@@ -8,6 +8,12 @@ menuconfig SYNAPTICS_PWM
 
 if SYNAPTICS_PWM
 
+config PWM_SYNA_SPWM
+	tristate "Synaptics SPWM support"
+	default n
+	help
+	  pwm driver for Synaptics SPWM.
+
 config PWM_DVF
 	tristate "DVF PWM support"
 	depends on ARCH_DVF101
