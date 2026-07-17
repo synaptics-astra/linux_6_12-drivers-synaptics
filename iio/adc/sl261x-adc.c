@@ -255,9 +255,7 @@ static void sl261x_adc_init(struct sl261x_adc_priv *priv)
 	val |= CTRL1_VOL_FROM_BANDGAP;
 	wrl(priv, CTRL1, val);
 
-	val = FIELD_PREP(CTRL1_BIAS, CTRL1_BIAS_8P9UA);
-	val |= CTRL1_BYPASS_FILTER;
-	val |= CTRL1_BANDGAP_VOL_BUF_EN;
+	val = FIELD_PREP(CTRL1_BIAS, CTRL1_BIAS_7P3UA);
 	wrl(priv, CTRL1, val);
 }
 
