@@ -43,7 +43,7 @@
 
 /* COUNTER regs */
 #define CLK_CTRL			0x0
-#define  CLK_CTRL_CLKDIV_SEL		GENMASK(3, 0) 
+#define  CLK_CTRL_CLKDIV_SEL		GENMASK(3, 0)
 #define CTRL				0x4
 #define  CTRL_AUTO_RELOAD_CC0		BIT(0)
 #define  CTRL_AUTO_RELOAD_CC1		BIT(1)
