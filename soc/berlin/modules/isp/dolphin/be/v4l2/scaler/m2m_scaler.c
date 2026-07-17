@@ -85,6 +85,14 @@ static const struct m2m_scaler_fmt m2m_scaler_formats[] = {
 		.w_align        = 2,
 		.h_align        = 2
 	},
+	{
+		.pixelformat    = V4L2_PIX_FMT_YUV24,
+		.nb_planes      = 1,
+		.bpp            = 24,  // packed YUV444 has 24 bits per pixel
+		.bpp_plane0     = 8,   // 8 bits for each channel (Y, U, V)
+		.w_align        = 2,
+		.h_align        = 2
+	},
 };
 
 static const struct frame_info scaler_output_dflt_fmt = {
@@ -328,8 +336,7 @@ static int m2m_scaler_get_addr(struct m2m_scaler_ctx *ctx, struct vb2_buffer *vb
 	    paddr[1] = (void *) vb2_dma_contig_plane_dma_addr(vb, UV_PLANE);
 #endif
 	else
-		paddr[1] = (paddr[0] +
-				frame->bytesperline * frame->height);
+		paddr[1] = (void *)((char *)paddr[0] + frame->sizeimage);
 
 #ifdef BYPASS_SCALER_DRIVER
 	*vaddr = vb2_plane_vaddr(vb, 0);
@@ -569,16 +576,22 @@ static int m2m_scaler_queue_setup(struct vb2_queue *vq,
 	}
 
 	if (*nb_planes) {
-		//validate number of planes
-		if (*nb_planes != SUPPORTED_NUM_PLANES)
-			return  -EINVAL;
-		if (sizes[0] < frame->sizeimage)
-			return  -EINVAL;
-		if (vq->max_num_buffers >= SYNA_SCALER_MAX_BUF_SLOT)
-			return -ENOBUFS;
+		unsigned int expected_planes =
+			(frame->fmt->pixelformat == V4L2_PIX_FMT_RGB24 ||
+			 frame->fmt->pixelformat == V4L2_PIX_FMT_YUV24) ? 1 : SUPPORTED_NUM_PLANES;
+
+	if (*nb_planes != expected_planes)
+		return -EINVAL;
+	if (sizes[0] < frame->sizeimage)
+		return -EINVAL;
+	if (expected_planes > 1 && sizes[1] < frame->sizeimage1)
+		return -EINVAL;
+	if (vq->max_num_buffers >= SYNA_SCALER_MAX_BUF_SLOT)
+		return -ENOBUFS;
 	} else {
 		/* Assign the allocate device for buffer creation */
-		if (frame->fmt->pixelformat == V4L2_PIX_FMT_RGB24)
+		if (frame->fmt->pixelformat == V4L2_PIX_FMT_RGB24 ||
+				frame->fmt->pixelformat == V4L2_PIX_FMT_YUV24)
 			*nb_planes = 1;
 		else
 			*nb_planes = 2;
@@ -587,7 +600,8 @@ static int m2m_scaler_queue_setup(struct vb2_queue *vq,
 	case V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE:
 		mem_type = ctx->io_mmu_buffer_output ?
 			SHM_NONSECURE_NON_CONTIG : SHM_NONSECURE_CONTIG;
-		if (frame->fmt->pixelformat != V4L2_PIX_FMT_RGB24)
+		if (frame->fmt->pixelformat != V4L2_PIX_FMT_RGB24 &&
+				frame->fmt->pixelformat != V4L2_PIX_FMT_YUV24)
 			*nb_planes = ctx->output_buffer_memory_type ? 2 : 1;
 		break;
 	case V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE:
@@ -599,10 +613,12 @@ static int m2m_scaler_queue_setup(struct vb2_queue *vq,
 		return -EINVAL;
 	}
 	for (i = 0; i < *nb_planes; ++i) {
-		if (*nb_planes == 1)
+		if (i == 0)
 			sizes[i] = frame->sizeimage;
+		else if (i == 1)
+			sizes[i] = frame->sizeimage1;
 		else
-			sizes[i] = frame->sizeimage >> i;
+			sizes[i] = 0;
 		alloc_devs[i] = ctx->m2m_scaler_dev->alloc_dev[mem_type];
 	}
 	return 0;
@@ -618,8 +634,11 @@ static int m2m_scaler_buf_prepare(struct vb2_buffer *vb)
 		return PTR_ERR(frame);
 	}
 
-	if (vb->vb2_queue->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE)
+	if (vb->vb2_queue->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) {
 		vb2_set_plane_payload(vb, 0, frame->sizeimage);
+		if (vb->num_planes > 1)
+			vb2_set_plane_payload(vb, 1, frame->sizeimage1);
+	}
 	return 0;
 }
 
@@ -677,6 +696,8 @@ static void m2m_scaler_stop_streaming(struct vb2_queue *q)
 	} else {
 		while ((dst_vb = v4l2_m2m_dst_buf_remove(ctx->fh.m2m_ctx))) {
 			vb2_set_plane_payload(&dst_vb->vb2_buf, 0, 0);
+			if (dst_vb->vb2_buf.num_planes > 1)
+				vb2_set_plane_payload(&dst_vb->vb2_buf, 1, 0);
 			v4l2_m2m_buf_done(dst_vb, VB2_BUF_STATE_ERROR);
 		}
 	}
@@ -808,13 +829,111 @@ static void print_v4l2_pix_format_mplane(struct v4l2_pix_format_mplane *pix_mp)
 	}
 }
 
+static const struct v4l2_format_info *video_vfmt_info(u32 format)
+{
+	static const struct v4l2_format_info formats[] = {
+		{
+			.format = V4L2_PIX_FMT_YUV24,
+			.pixel_enc = V4L2_PIXEL_ENC_YUV,
+			.mem_planes = 1,
+			.comp_planes = 1,
+			.bpp = { 3, 0, 0, 0 },
+			.hdiv = 1,
+			.vdiv = 1
+		},
+	};
+
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(formats); i++) {
+		if (formats[i].format == format)
+			return &formats[i];
+	}
+
+	return NULL;
+}
+
+static void m2m_scaler_set_pixfmt_mp(struct v4l2_pix_format_mplane *pix_mp,
+		bool mmu_enabled)
+{
+	const struct v4l2_format_info *info = NULL;
+	uint32_t bytesperline;
+	uint32_t sizeimage = 0;
+	uint32_t width;
+	uint32_t height;
+	uint32_t aligned_height;
+	int i;
+
+	/* Active alignment for the reported/logical width & height */
+	width = ALIGN(pix_mp->width, MTR_ACTIVE_WIDTH_ALIGNMENT);
+	height = ALIGN(pix_mp->height, MTR_ACTIVE_HEIGHT_ALIGNMENT);
+	pix_mp->width = width;
+	pix_mp->height = height;
+
+	info = v4l2_format_info(pix_mp->pixelformat);
+	if (info == NULL) {
+		info = video_vfmt_info(pix_mp->pixelformat);
+		if (info == NULL)
+			return;
+	}
+
+	/* Content/MMU alignment is used ONLY for stride/sizeimage math, kept in
+	 * a separate local so it never overwrites the logical width/height that
+	 * downstream checks (e.g. streamon's output size limit) rely on. Align
+	 * width FIRST then multiply by bpp - confirmed via ISPSS_BE_MTR_GetStride()
+	 * register trace to match the actual hardware stride (6144 for 1920x3bpp).
+	 */
+	aligned_height = height;
+	if (mmu_enabled) {
+		bytesperline = info->bpp[0] * ALIGN(width, MTR_CONTENT_WIDTH_ALIGNMENT);
+		aligned_height = ALIGN(height, MTR_CONTENT_HEIGHT_ALIGNMENT);
+	} else {
+		bytesperline = info->bpp[0] * width;
+	}
+	sizeimage = bytesperline * aligned_height;
+
+	if (info->comp_planes == 1) {
+		pix_mp->plane_fmt[0].bytesperline = bytesperline;
+		pix_mp->plane_fmt[0].sizeimage = sizeimage;
+		goto print_info;
+	}
+
+	if (info->mem_planes == 1) {
+		pix_mp->plane_fmt[0].bytesperline = bytesperline;
+		pix_mp->plane_fmt[0].sizeimage = sizeimage;
+		for (i = 1; i < info->comp_planes; i++) {
+			bytesperline = info->bpp[i] * DIV_ROUND_UP(width, info->hdiv);
+			if (mmu_enabled)
+				bytesperline = info->bpp[i] * ALIGN(DIV_ROUND_UP(width,
+							info->hdiv), MTR_CONTENT_WIDTH_ALIGNMENT);
+			sizeimage = bytesperline * DIV_ROUND_UP(aligned_height, info->vdiv);
+			pix_mp->plane_fmt[0].sizeimage += sizeimage;
+		}
+	} else {
+		pix_mp->plane_fmt[0].bytesperline = bytesperline;
+		pix_mp->plane_fmt[0].sizeimage = sizeimage;
+		pix_mp->num_planes = info->mem_planes;
+		for (i = 1; i < info->comp_planes; i++) {
+			bytesperline = info->bpp[i] * DIV_ROUND_UP(width, info->hdiv);
+			if (mmu_enabled)
+				bytesperline = info->bpp[i] * ALIGN(DIV_ROUND_UP(width,
+							info->hdiv), MTR_CONTENT_WIDTH_ALIGNMENT);
+			sizeimage = bytesperline * DIV_ROUND_UP(aligned_height, info->vdiv);
+			pix_mp->plane_fmt[i].bytesperline = bytesperline;
+			pix_mp->plane_fmt[i].sizeimage = sizeimage;
+		}
+	}
+print_info:
+	print_v4l2_pix_format_mplane(pix_mp);
+}
+
 static int m2m_scaler_g_fmt_mp(struct file *file, void *fh, struct v4l2_format *fmt)
 {
 	struct m2m_scaler_ctx *ctx = fh_to_ctx(fh);
 	struct v4l2_pix_format_mplane *pix_mp;
 	struct frame_info *frame = NULL;
-	u32 orig_width, orig_height;
 	u32 align_width, align_height;
+	bool mmu_enabled;
 	int ret = 0;
 
 	frame = ctx_get_frame(ctx, fmt->type);
@@ -829,27 +948,15 @@ static int m2m_scaler_g_fmt_mp(struct file *file, void *fh, struct v4l2_format *
 	pix_mp->height = frame->height;
 	pix_mp->field = frame->field;
 
-	if ((fmt->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE && ctx->io_mmu_buffer_output) ||
-			(fmt->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE &&
-			 ctx->io_mmu_buffer_capture)) {
+	mmu_enabled = (fmt->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) ?
+		ctx->io_mmu_buffer_output : ctx->io_mmu_buffer_capture;
+	align_width = (fmt->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) ?
+		MTR_CONTENT_WIDTH_ALIGNMENT : MTR_OUTPUT_WIDTH_ALIGNMENT;
+	align_height = (fmt->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) ?
+		MTR_CONTENT_HEIGHT_ALIGNMENT : MTR_OUTPUT_HEIGHT_ALIGNMENT;
 
-		orig_width = ALIGN(pix_mp->width, MTR_ACTIVE_WIDTH_ALIGNMENT);
-		orig_height = ALIGN(pix_mp->height, MTR_ACTIVE_HEIGHT_ALIGNMENT);
+	m2m_scaler_set_pixfmt_mp(pix_mp, mmu_enabled);
 
-		align_width = (fmt->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) ?
-			MTR_CONTENT_WIDTH_ALIGNMENT : MTR_OUTPUT_WIDTH_ALIGNMENT;
-		align_height = (fmt->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) ?
-			MTR_CONTENT_HEIGHT_ALIGNMENT : MTR_OUTPUT_HEIGHT_ALIGNMENT;
-
-		v4l2_fill_pixfmt_mp(pix_mp,
-				pix_mp->pixelformat,
-				ALIGN(pix_mp->width, align_width),
-				ALIGN(pix_mp->height, align_height));
-
-		// Restore original width and height after adjustment
-		pix_mp->width = orig_width;
-		pix_mp->height = orig_height;
-	}
 	pix_mp->num_planes = frame->fmt->nb_planes;
 
 	m2m_scaler_check_contigous_memory_required(ctx, fmt->type, pix_mp);
@@ -879,7 +986,6 @@ static int m2m_scaler_try_fmt_out_mp(struct file *file, void *fh, struct v4l2_fo
 	struct v4l2_pix_format_mplane *pix_mp = &fmt->fmt.pix_mp;
 	const struct m2m_scaler_fmt *format = NULL;
 	struct frame_info *frame = NULL;
-	u32 orig_width, orig_height;
 	int ret = 0;
 
 	if (ctx->output_buffer_memory_type == CONTIGOUS_MEMORY_TYPE &&
@@ -903,21 +1009,7 @@ static int m2m_scaler_try_fmt_out_mp(struct file *file, void *fh, struct v4l2_fo
 	if (frame == NULL)
 		return -EINVAL;
 
-	if (ctx->io_mmu_buffer_output) {
-		orig_width = ALIGN(pix_mp->width, MTR_ACTIVE_WIDTH_ALIGNMENT);
-		orig_height = ALIGN(pix_mp->height, MTR_ACTIVE_HEIGHT_ALIGNMENT);
-		v4l2_fill_pixfmt_mp(pix_mp,
-				pix_mp->pixelformat,
-				ALIGN(pix_mp->width, MTR_CONTENT_WIDTH_ALIGNMENT),
-				ALIGN(pix_mp->height, MTR_CONTENT_HEIGHT_ALIGNMENT));
-		pix_mp->width = orig_width;
-		pix_mp->height = orig_height;
-	} else {
-		v4l2_fill_pixfmt_mp(pix_mp,
-				pix_mp->pixelformat,
-				pix_mp->width,
-				pix_mp->height);
-	}
+	m2m_scaler_set_pixfmt_mp(pix_mp, ctx->io_mmu_buffer_output);
 	pix_mp->field = V4L2_FIELD_NONE;
 
 	m2m_scaler_check_contigous_memory_required(ctx, fmt->type, pix_mp);
@@ -932,7 +1024,6 @@ static int m2m_scaler_try_fmt_cap_mp(struct file *file, void *fh, struct v4l2_fo
 	struct v4l2_pix_format_mplane *pix_mp = &fmt->fmt.pix_mp;
 	const struct m2m_scaler_fmt *format = NULL;
 	struct frame_info *frame  = NULL;
-	u32 orig_width, orig_height;
 	int ret = 0;
 
 	/* Check if the hardware supports the requested format, use the default
@@ -952,21 +1043,7 @@ static int m2m_scaler_try_fmt_cap_mp(struct file *file, void *fh, struct v4l2_fo
 	if (frame == NULL)
 		return -EINVAL;
 
-	if (ctx->io_mmu_buffer_capture) {
-		orig_width = ALIGN(pix_mp->width, MTR_ACTIVE_WIDTH_ALIGNMENT);
-		orig_height = ALIGN(pix_mp->height, MTR_ACTIVE_HEIGHT_ALIGNMENT);
-		v4l2_fill_pixfmt_mp(pix_mp,
-				pix_mp->pixelformat,
-				ALIGN(pix_mp->width, MTR_OUTPUT_WIDTH_ALIGNMENT),
-				ALIGN(pix_mp->height, MTR_OUTPUT_HEIGHT_ALIGNMENT));
-		pix_mp->width = orig_width;
-		pix_mp->height = orig_height;
-	} else {
-		v4l2_fill_pixfmt_mp(pix_mp,
-				pix_mp->pixelformat,
-				pix_mp->width,
-				pix_mp->height);
-	}
+	m2m_scaler_set_pixfmt_mp(pix_mp, ctx->io_mmu_buffer_capture);
 	pix_mp->field = V4L2_FIELD_NONE;
 
 	print_v4l2_pix_format_mplane(pix_mp);
@@ -1017,6 +1094,13 @@ static int m2m_scaler_s_fmt_mp(struct file *file, void *fh, struct v4l2_format *
 	frame->height = pix_mp->height;
 	frame->bytesperline = pix_mp->plane_fmt[0].bytesperline;
 	frame->sizeimage = pix_mp->plane_fmt[0].sizeimage;
+	if (pix_mp->num_planes > 1) {
+		frame->bytesperline1 = pix_mp->plane_fmt[1].bytesperline;
+		frame->sizeimage1 = pix_mp->plane_fmt[1].sizeimage;
+	} else {
+		frame->bytesperline1 = 0;
+		frame->sizeimage1 = 0;
+	}
 	frame->field = pix_mp->field;
 
 	/* Set crop parameters based on frame format */
@@ -1222,7 +1306,9 @@ static int m2m_scaler_streamon(struct file *file, void *priv,
 	/* DNS block doesn't support color conversion if src fromat and
 	 * dst format is different  then send error while streaming
 	 */
-	if (ctx->src.fmt->pixelformat != ctx->dst.fmt->pixelformat) {
+	if (ctx->src.fmt->pixelformat != ctx->dst.fmt->pixelformat &&
+			!(ctx->src.fmt->pixelformat == V4L2_PIX_FMT_YUV24 &&
+				ctx->dst.fmt->pixelformat == V4L2_PIX_FMT_NV12M)) {
 		dev_err(ctx->m2m_scaler_dev->dev, "%s: No color conversion src fmt %d dst fmt %d\n",
 			__func__, ctx->src.fmt->pixelformat, ctx->dst.fmt->pixelformat);
 		return -EINVAL;

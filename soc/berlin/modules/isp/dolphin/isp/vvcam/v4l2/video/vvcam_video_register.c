@@ -612,7 +612,7 @@ static int vvcam_video_mfmt_to_vfmt(struct v4l2_subdev_format *mfmt, struct v4l2
     bytesperline = info->bpp[0] * width;
 #ifdef DOLPHIN
     if (mmu_enabled) {
-        bytesperline = ALIGN(bytesperline, MTR_CONTENT_WIDTH_ALIGNMENT);
+        bytesperline = info->bpp[0] * ALIGN(width, MTR_CONTENT_WIDTH_ALIGNMENT);
         height  = ALIGN(height, MTR_CONTENT_HEIGHT_ALIGNMENT);
     }
 #endif
@@ -637,7 +637,8 @@ static int vvcam_video_mfmt_to_vfmt(struct v4l2_subdev_format *mfmt, struct v4l2
             bytesperline = info->bpp[i] * DIV_ROUND_UP(width, info->hdiv);
 #ifdef DOLPHIN
             if (mmu_enabled) {
-                bytesperline = ALIGN(bytesperline, MTR_CONTENT_WIDTH_ALIGNMENT);
+                bytesperline = info->bpp[i] * ALIGN(DIV_ROUND_UP(width,
+                            info->hdiv), MTR_CONTENT_WIDTH_ALIGNMENT);
                 height  = ALIGN(height, MTR_CONTENT_HEIGHT_ALIGNMENT);
             }
 #endif
@@ -652,7 +653,8 @@ static int vvcam_video_mfmt_to_vfmt(struct v4l2_subdev_format *mfmt, struct v4l2
             bytesperline = info->bpp[i] * DIV_ROUND_UP(width, info->hdiv);
 #ifdef DOLPHIN
             if (mmu_enabled) {
-                bytesperline = ALIGN(bytesperline, MTR_CONTENT_WIDTH_ALIGNMENT);
+                bytesperline = info->bpp[i] * ALIGN(DIV_ROUND_UP(width,
+                            info->hdiv), MTR_CONTENT_WIDTH_ALIGNMENT);
                 height  = ALIGN(height, MTR_CONTENT_HEIGHT_ALIGNMENT);
             }
 #endif

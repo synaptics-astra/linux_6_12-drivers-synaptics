@@ -940,7 +940,6 @@ UINT32 ISPSS_MTR_GetStride(struct ISP_MTR_BUF_INFO *pIspBufInfo, UINT32 *stride_
 	case ISP_SRCFMT_YUV422SP:
 	case ISP_SRCFMT_YUV420SP:
 	case ISP_SRCFMT_YUV422PACK:
-		//        case ISP_SRCFMT_YUV444PACK:
 		if (pIspBufInfo->m_bits_per_pixel == 8)
 			*stride_64B = DIV_ROUND_UP(pictureWidth, 256) * 4;
 		else if (pIspBufInfo->m_bits_per_pixel == 10)
@@ -959,7 +958,6 @@ UINT32 ISPSS_MTR_GetStride(struct ISP_MTR_BUF_INFO *pIspBufInfo, UINT32 *stride_
 		break;
 	case ISP_SRCFMT_RGB888PACK:
 	case ISP_SRCFMT_YUV444PACK:
-		//*stride_64B = (DIV_ROUND_UP(pictureWidth/64)) * 4;
 		*stride_64B = (DIV_ROUND_UP((pictureWidth * 3), 256)) * 4;
 		break;
 	case ISP_SRCFMT_BAYER_8BIT:
