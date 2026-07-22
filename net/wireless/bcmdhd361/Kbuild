@@ -867,6 +867,13 @@ endif
 ##########################
 DRIVER_TYPE ?= $(CONFIG_BCMDHD)
 
+ifeq ($(CONFIG_BCMDHD_PCIE),y)
+ifneq ($(CONFIG_BCMDHD_WFB),y)
+  DRIVER_TYPE :=
+  $(warning : ** PCIe without DHD_WFB defined, skip building ko module **)
+endif
+endif
+
 #########################
 # Chip dependent feature
 #########################
