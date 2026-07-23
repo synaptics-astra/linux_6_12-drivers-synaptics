@@ -20160,7 +20160,9 @@ dhd_os_check_wakelock_all(dhd_pub_t *pub)
 	c = dhd->wakelock_counter;
 	l1 = dhd_wake_lock_active(dhd->wl_wifi);
 	l2 = dhd_wake_lock_active(dhd->wl_wdwake);
+#ifdef DHD_WAKELOCK_ENABLE_RX
 	l3 = dhd_wake_lock_active(dhd->wl_rxwake);
+#endif /* DHD_WAKELOCK_ENABLE_RX  */
 	l4 = dhd_wake_lock_active(dhd->wl_ctrlwake);
 	l7 = dhd_wake_lock_active(dhd->wl_evtwake);
 #ifdef BCMPCIE_OOB_HOST_WAKE
@@ -20170,7 +20172,9 @@ dhd_os_check_wakelock_all(dhd_pub_t *pub)
 	l6 = dhd_wake_lock_active(dhd->wl_scanwake);
 #endif /* DHD_USE_SCAN_WAKELOCK */
 	l8 = dhd_wake_lock_active(dhd->wl_pmwake);
+#ifdef DHD_WAKELOCK_ENABLE_TX
 	l9 = dhd_wake_lock_active(dhd->wl_txflwake);
+#endif /* DHD_WAKELOCK_ENABLE_TX  */
 	l10 = dhd_wake_lock_active(dhd->wl_nanwake);
 	lock_active = (l1 || l2 || l3 || l4 || l5 || l6 || l7 || l8 || l9 || l10);
 
