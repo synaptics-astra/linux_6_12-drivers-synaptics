@@ -3256,7 +3256,7 @@ static DEVICE_ATTR_RO(gpuinfo);
 static ssize_t gpu_util_show(struct device *dev,
                              struct device_attribute *attr, char *buf)
 {
-#ifdef CONFIG_MALI_MIDGARD_DVFS
+#if defined(CONFIG_MALI_DEVFREQ) || defined(CONFIG_MALI_MIDGARD_DVFS)
 	struct kbase_device *kbdev;
 	struct kbasep_pm_metrics cur, diff;
 	static struct kbasep_pm_metrics sampled;
@@ -3285,7 +3285,7 @@ static ssize_t gpu_util_show(struct device *dev,
 	return sysfs_emit(buf, "%u\n", utilization);
 #else
 	return sysfs_emit(buf, "unknown\n");
-#endif
+#endif /* defined(CONFIG_MALI_DEVFREQ) || defined(CONFIG_MALI_MIDGARD_DVFS) */
 }
 
 static DEVICE_ATTR_RO(gpu_util);
