@@ -8,9 +8,11 @@
 
 #include <linux/bitops.h>
 #include <linux/hwmon.h>
+#include <linux/hwspinlock.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
+#include <linux/iopoll.h>
 #include <linux/module.h>
 #include <linux/of_device.h>
 #include <linux/device.h>
@@ -44,6 +46,8 @@
 #define MYNA2_STATUS	0x8
 #define MYNA2_DATA	0xc
 
+#define DOLPHIN_HWMON_HWLOCK_TIMEOUT	5000
+
 struct dolphin_hwmon_cfg {
 	u8 ctrl;
 	u8 status;
@@ -56,6 +60,7 @@ struct dolphin_hwmon {
 	int irq;
 	struct completion read_completion;
 	struct mutex lock;
+	struct hwspinlock *hwlock;
 };
 
 static irqreturn_t dolphin_hwmon_irq(int irq, void *data)
@@ -75,16 +80,22 @@ static int dolphin_read_temp(struct dolphin_hwmon *hwmon, long *temp)
 {
 	u32 val;
 	long t;
+	int ret = 0;
 	struct completion *completion = &hwmon->read_completion;
 	const struct dolphin_hwmon_cfg *cfg = hwmon->cfg;
 
 	mutex_lock(&hwmon->lock);
 
-	reinit_completion(completion);
-
-	val = readl_relaxed(hwmon->base + cfg->status);
-	val |= INT_EN;
-	writel_relaxed(val, hwmon->base + cfg->status);
+	if (hwmon->hwlock) {
+		ret = hwspin_lock_timeout_raw(hwmon->hwlock, DOLPHIN_HWMON_HWLOCK_TIMEOUT);
+		if (ret)
+			goto unlock_mutex;
+	} else {
+		reinit_completion(completion);
+		val = readl_relaxed(hwmon->base + cfg->status);
+		val |= INT_EN;
+		writel_relaxed(val, hwmon->base + cfg->status);
+	}
 
 	val = readl_relaxed(hwmon->base + cfg->ctrl);
 	val |= ENA;
@@ -93,10 +104,17 @@ static int dolphin_read_temp(struct dolphin_hwmon *hwmon, long *temp)
 	val |= CLK_EN;
 	writel_relaxed(val, hwmon->base + cfg->ctrl);
 
-	t = wait_for_completion_interruptible_timeout(completion, HZ);
-	if (t <= 0) {
-		mutex_unlock(&hwmon->lock);
-		return t ? t : -ETIMEDOUT;
+	if (hwmon->hwlock) {
+		ret = read_poll_timeout(readl_relaxed, val, (val & DATA_RDY),
+					320, 200000, false, hwmon->base + cfg->status);
+		if (ret)
+			goto unlock_hwspin;
+	} else {
+		t = wait_for_completion_interruptible_timeout(completion, HZ);
+		if (t <= 0) {
+			ret = t ? t : -ETIMEDOUT;
+			goto unlock_mutex;
+		}
 	}
 
 	val = readl_relaxed(hwmon->base + cfg->data);
@@ -125,9 +143,14 @@ static int dolphin_read_temp(struct dolphin_hwmon *hwmon, long *temp)
 	val &= ~CLK_EN;
 	writel_relaxed(val, hwmon->base + cfg->ctrl);
 
+unlock_hwspin:
+	if (hwmon->hwlock)
+		hwspin_unlock_raw(hwmon->hwlock);
+
+unlock_mutex:
 	mutex_unlock(&hwmon->lock);
 
-	return 0;
+	return ret;
 }
 
 static int dolphin_hwmon_read(struct device *dev, enum hwmon_sensor_types type,
@@ -197,6 +220,15 @@ static int dolphin_hwmon_probe(struct platform_device *pdev)
 	hwmon->base = devm_ioremap_resource(&pdev->dev, res);
 	if (IS_ERR(hwmon->base))
 		return PTR_ERR(hwmon->base);
+
+	/* hwspinlock is optional */
+	ret = of_hwspin_lock_get_id(pdev->dev.of_node, 0);
+	if (ret < 0) {
+		if (ret == -EPROBE_DEFER)
+			return ret;
+	} else {
+		hwmon->hwlock = devm_hwspin_lock_request_specific(dev, ret);
+	}
 
 	hwmon->irq = platform_get_irq(pdev, 0);
 	if (hwmon->irq < 0) {
