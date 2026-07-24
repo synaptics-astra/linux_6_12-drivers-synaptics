@@ -36,6 +36,8 @@
  * Panel takes some time to register, we will defer only 2 times for the sub-panel registration
  */
 #define SUB_PANEL_MAX_DEFER_COUNT 2
+#define DEFAULT_DLY_AFTR_RST 5
+#define DEFAUL_RST_DLY 5
 
 typedef struct panel_timing_info_t {
 	unsigned int hact;
@@ -63,6 +65,7 @@ typedef struct panel_desc_t {
 	struct regulator	*supply;
 	const char *compatible_panel;
 	struct drm_panel *sub_panel;
+	unsigned int        dly_aftr_rst;
 	void                *pMipiDsiInfo;  /* Pointer to MIPI DSI info for standby commands */
 } SYNA_PANEL_DESC;
 
@@ -147,8 +150,12 @@ static int syna_panel_dsi_prepare(struct drm_panel *panel)
 
 	syna_bridge_enable();
 
-	/* Release MIPI from Reset */
-	avio_module_mipirst_set_gpio_val(0);
+	if (!display_info.u.status) {
+		avio_module_mipirst_set_gpio_val(1);
+		mdelay(DEFAUL_RST_DLY);
+		avio_module_mipirst_set_gpio_val(0);
+		mdelay(synaPanelInfo.dly_aftr_rst);
+	}
 
 	syna_bridge_modeset(&synaPanelTimings);
 
@@ -163,9 +170,6 @@ static int syna_panel_dsi_unprepare(struct drm_panel *panel)
 	int err;
 
 	syna_bridge_disable();
-
-	/* Reset the MIPI */
-	avio_module_mipirst_set_gpio_val(1);
 
 	if (synaPanelInfo.supply) {
 		if (regulator_is_enabled(synaPanelInfo.supply)) {
@@ -338,6 +342,8 @@ int syna_panel_dsi_init(struct platform_device *pdev)
 	of_property_read_u32(mipi_dev->of_node, "VSYNCWIDTH", &synaPanelInfo.panel_timing.vsa);
 	of_property_read_u32(mipi_dev->of_node, "VBP", &synaPanelInfo.panel_timing.vbp);
 	of_property_read_u32(mipi_dev->of_node, "FREQ", &synaPanelInfo.panel_timing.pixelclock);
+	if (of_property_read_u32(mipi_dev->of_node, "dly_aftr_rst", &synaPanelInfo.dly_aftr_rst))
+		synaPanelInfo.dly_aftr_rst = DEFAULT_DLY_AFTR_RST;
 
 	of_property_read_u32(mipi_dev->of_node, "bits_per_pixel", &synaPanelInfo.bpp);
 	of_property_read_u32(mipi_dev->of_node, "busformat", &synaPanelInfo.outformat);
@@ -387,7 +393,6 @@ int syna_panel_dsi_init(struct platform_device *pdev)
 
 	of_node_put(mipi_dev->of_node);
 
-	avio_module_mipirst_set_gpio_val(0);
 	if (mipibl)
 		gpiod_direction_output(mipibl, 1);
 
