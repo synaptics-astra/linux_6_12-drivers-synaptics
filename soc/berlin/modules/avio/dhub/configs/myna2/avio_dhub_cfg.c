@@ -128,13 +128,7 @@ int drv_dhub_initialize_dhub(void *h_dhub_ctx)
 			LCDC_config, VPP_NUM_OF_CHANNELS,
 			DHUB_TYPE_64BIT, hDhubCtx->vpp_bcm_base, 0, channel_init_mask);
 
-	/* Avoid initializing BCM channel when logo is displayed from bootloader
-	 * TBD : Root cause need for AGDHUB re-initialization, when AGDHUB
-	 * is already initialized in bootloader
-	*/
-	channel_init_mask = (1 << AG_NUM_OF_CHANNELS) - 1;
-	if (display_info.u.status)
-		channel_init_mask &= ~(1 << avioDhubChMap_aio64b_BCM_R);
+	channel_init_mask = display_info.u.status ? 0 : (1 << AG_NUM_OF_CHANNELS) - 1;
 
 	DhubInitialization(DHUB_ID_AG_DHUB, DHUB_TYPE_64BIT, CPUINDEX, hDhubCtx->ag_dhub_base,
 			hDhubCtx->ag_sram_base,

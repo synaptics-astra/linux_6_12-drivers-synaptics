@@ -56,6 +56,40 @@ void semaphore_hdl(UNSG32 ra,	/*      Base address of a BIU instance of $SemaHub
 }
 
 /******************************************************************************
+*	Function: semaphore_cfg_ex
+*	Description: Configurate a semaphore's depth & optionally reset pointers.
+*	Return:	UNSG32		Number of (adr,pair) added to cfgQ
+*******************************************************************************/
+static UNSG32 semaphore_cfg_ex(void *hdl,	/*Handle to HDL_semaphore */
+			 SIGN32 id,	/*Semaphore ID in $SemaHub */
+			 SIGN32 depth,	/*Semaphore (virtual FIFO) depth */
+			 T64b cfgQ[],	/*Pass NULL to directly init SemaHub, or
+					   Pass non-zero to receive programming sequence
+					   in (adr,data) pairs
+					 */
+			 UNSG32 chanInit	/*0 to skip HW init, 1 to init HW */
+	)
+{
+	HDL_semaphore *sem = (HDL_semaphore *) hdl;
+
+	T32Semaphore_CFG cfg;
+	UNSG32 i = 0, a;
+
+	if (chanInit) {
+		a = sem->ra + RA_SemaHub_ARR + id * sizeof(SIE_Semaphore);
+
+		cfg.u32 = 0;
+		cfg.uCFG_DEPTH = depth;
+		IO32CFG(cfgQ, i, a + RA_Semaphore_CFG, cfg.u32);
+	}
+
+	sem->depth[id] = depth;
+
+	return i;
+	/**	ENDOFFUNCTION: semaphore_cfg_ex **/
+}
+
+/******************************************************************************
 *	Function: semaphore_cfg
 *	Description: Configurate a semaphore's depth & reset pointers.
 *	Return:	UNSG32		Number of (adr,pair) added to cfgQ
@@ -69,18 +103,7 @@ UNSG32 semaphore_cfg(void *hdl,	/*Handle to HDL_semaphore */
 					 */
 	)
 {
-	HDL_semaphore *sem = (HDL_semaphore *) hdl;
-
-	T32Semaphore_CFG cfg;
-	UNSG32 i = 0, a;
-
-	a = sem->ra + RA_SemaHub_ARR + id * sizeof(SIE_Semaphore);
-
-	cfg.u32 = 0;
-	cfg.uCFG_DEPTH = sem->depth[id] = depth;
-	IO32CFG(cfgQ, i, a + RA_Semaphore_CFG, cfg.u32);
-
-	return i;
+	return semaphore_cfg_ex(hdl, id, depth, cfgQ, 1);
 	/**	ENDOFFUNCTION: semaphore_cfg **/
 }
 
@@ -361,10 +384,11 @@ UNSG32 hbo_queue_cfg(void *hdl,	/*Handle to HDL_hbo */
 			 UNSG32 base,	/*Channel FIFO base address (byte address) */
 			 SIGN32 depth,	/*Channel FIFO depth, in 64b word */
 			 SIGN32 enable,	/*0 to disable, 1 to enable */
-			 T64b cfgQ[]	/*Pass NULL to directly init HBO, or
+			 T64b cfgQ[],	/*Pass NULL to directly init HBO, or
 					   Pass non-zero to receive programming sequence
 					   in (adr,data) pairs
 					 */
+			 UNSG32 chanInit	/*0 to skip HW init, 1 to init HW */
 	)
 {
 	HDL_hbo *hbo = (HDL_hbo *) hdl;
@@ -372,15 +396,21 @@ UNSG32 hbo_queue_cfg(void *hdl,	/*Handle to HDL_hbo */
 	T32FiFo_CFG cfg;
 	UNSG32 i = 0, a;
 
-	a = hbo->ra + RA_HBO_ARR + id * sizeof(SIE_FiFo);
-	IO32CFG(cfgQ, i, a + RA_FiFo_START, 0);
+	if (chanInit) {
+		a = hbo->ra + RA_HBO_ARR + id * sizeof(SIE_FiFo);
+		IO32CFG(cfgQ, i, a + RA_FiFo_START, 0);
 
-	cfg.u32 = 0;
-	cfg.uCFG_BASE = hbo->base[id] = base;
-	IO32CFG(cfgQ, i, a + RA_FiFo_CFG, cfg.u32);
+		cfg.u32 = 0;
+		cfg.uCFG_BASE = base;
+		IO32CFG(cfgQ, i, a + RA_FiFo_CFG, cfg.u32);
+	}
 
-	i += semaphore_cfg(fifoCtl, id, depth, cfgQ ? (cfgQ + i) : NULL);
-	IO32CFG(cfgQ, i, a + RA_FiFo_START, enable);
+	hbo->base[id] = base;
+	i += semaphore_cfg_ex(fifoCtl, id, depth, cfgQ ? (cfgQ + i) : NULL, chanInit);
+
+	if (chanInit) {
+		IO32CFG(cfgQ, i, a + RA_FiFo_START, enable);
+	}
 
 	return i;
 	/**	ENDOFFUNCTION: hbo_queue_cfg **/
@@ -710,8 +740,6 @@ UNSG32 dhub_channel_cfg(void *hdl,	/*Handle to HDL_dhub */
 			hbo_queue_enable(hbo, dataID, 0, NULL);
 			hbo_queue_clear(hbo, dataID);
 			busyStatus = hbo_queue_busy(hbo);
-			//if(bTST(busyStatus, cmdID) || bTST(busyStatus, dataID))
-			//      return 0;
 		}
 		a = dhub->ra + RA_dHubReg_ARR + id * sizeof(SIE_dHubChannel);
 		xdbg("hal_dhub::  value of Channel Addr    is %0x \n", a);
@@ -725,11 +753,14 @@ UNSG32 dhub_channel_cfg(void *hdl,	/*Handle to HDL_dhub */
 		xdbg("hal_dhub::  addr of ChannelCFG is %0x data is %0x \n",
 			a + RA_dHubChannel_CFG, cfg.u32);
 		IO32CFG(cfgQ, i, a + RA_dHubChannel_CFG, cfg.u32);
+	}
 
-		i += hbo_queue_cfg(hbo, cmdID, baseCmd, depthCmd,
-				enable, cfgQ ? (cfgQ + i) : NULL);
-		i += hbo_queue_cfg(hbo, dataID, baseData, depthData,
-				enable, cfgQ ? (cfgQ + i) : NULL);
+	i += hbo_queue_cfg(hbo, cmdID, baseCmd, depthCmd,
+			enable, cfgQ ? (cfgQ + i) : NULL, chanInit);
+	i += hbo_queue_cfg(hbo, dataID, baseData, depthData,
+			enable, cfgQ ? (cfgQ + i) : NULL, chanInit);
+
+	if (chanInit) {
 		xdbg("hal_dhub::  addr of ChannelEN is %0x data is %0x \n",
 			a + RA_dHubChannel_START, enable);
 		IO32CFG(cfgQ, i, a + RA_dHubChannel_START, enable);

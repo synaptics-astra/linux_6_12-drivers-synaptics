@@ -397,11 +397,6 @@ void DhubInitialization(DHUB_ID dHubId, DHUB_TYPE dHubType, SIGN32 cpuId,
 				*	   ! */
 			chanInit
 		);
-
-		// setup interrupt for channel chanId
-		//configure the semaphore depth to be 1
-		if (chanInit)
-			semaphore_cfg(pSemHandle, chanId, 1, 0);
 	}
 }
 

@@ -273,10 +273,11 @@ UNSG32 hbo_queue_cfg(void *hdl,	/*!     Handle to HDL_hbo ! */
 			 UNSG32 base,	/*!     Channel FIFO base address (byte address) ! */
 			 SIGN32 depth,	/*!     Channel FIFO depth, in 64b word ! */
 			 SIGN32 enable,	/*!     0 to disable, 1 to enable ! */
-			 T64b cfgQ[]	/*! Pass NULL to directly init HBO, or
+			 T64b cfgQ[],	/*! Pass NULL to directly init HBO, or
 					   Pass non-zero to receive programming sequence
 					   in (adr,data) pairs
 					   ! */
+			 UNSG32 chanInit	/*!     0 to skip HW init, 1 to init HW ! */
 	);
 
 /********************************************************************************************
