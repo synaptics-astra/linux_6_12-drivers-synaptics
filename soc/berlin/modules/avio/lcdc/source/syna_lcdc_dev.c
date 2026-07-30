@@ -486,6 +486,8 @@ void syna_lcdc_irq(int intrMask)
 			/* read & clear active interrupts */
 
 			stat = syna_lcdc_read(dev, LCDC_REG_INTSR);
+			if (stat & INT_UNDERRUN)
+				avio_debug("LCDC%d frame underrun!\n", i);
 			GA_REG_WORD32_WRITE(dev->core_addr + LCDC_REG_INTSR, stat);
 
 			if (stat & INT_FRAME_DONE || dev->is_first_frame) {
