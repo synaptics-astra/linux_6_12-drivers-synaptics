@@ -117,6 +117,7 @@ syna_drm-y += port/drm_syna_common.o
 syna_drm-y += panel/panel_dsi.o
 syna_drm-y += bridge/syna_bridge.o
 syna_drm-$(CONFIG_SYNA_DRM_BRIDGE_LT9611) += bridge/lontium-lt9611.o
+ccflags-$(CONFIG_SYNA_DRM_BRIDGE_LT9611) += -DLT9611_OPTIMIZE_INIT_TIME
 ifeq ($(KV_GT_5_10_0), true)
 syna_drm-y += port/dmabuf/drm_syna_port.o
 else

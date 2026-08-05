@@ -34,6 +34,11 @@
 
 #define LT9611_4LANES	0
 
+/*
+ * Define LT9611_OPTIMIZE_INIT_TIME in Makefile to skip debug video check
+ * and reduce init time by ~500ms. Undefine to match mainline lt9611 driver.
+ */
+
 struct lt9611 {
 	struct device *dev;
 	struct regmap *regmap;
@@ -257,6 +262,7 @@ static void lt9611_pll_setup(struct lt9611 *lt9611, const struct drm_display_mod
 	return;
 }
 
+#ifndef LT9611_OPTIMIZE_INIT_TIME
 static int lt9611_read_video_check(struct lt9611 *lt9611, unsigned int reg, unsigned int *val)
 {
 	unsigned int temp, temp2;
@@ -314,6 +320,7 @@ end:
 	dev_err(lt9611->dev, "read video check error\n");
 	return -1;
 }
+#endif
 
 static void lt9611_hdmi_tx_digital(struct lt9611 *lt9611)
 {
@@ -431,13 +438,13 @@ static int lt9611_init(struct lt9611 *lt9611)
 	lt9611_hdmi_tx_digital(lt9611);
 	lt9611_hdmi_tx_phy(lt9611);
 
+#ifndef LT9611_OPTIMIZE_INIT_TIME
 	msleep(500);
-
 	lt9611_video_check(lt9611);
+#endif
 
 	/* Enable HDMI output */
-	ret = regmap_write(lt9611->regmap, 0x8130, 0xea);
-	return ret;
+	return regmap_write(lt9611->regmap, 0x8130, 0xea);
 }
 
 static void lt9611_bridge_deinit(void)
