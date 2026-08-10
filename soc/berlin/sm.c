@@ -650,11 +650,11 @@ static int get_sm_time(struct device *dev, u64 *ms)
 
 	msg = MV_SM_GET_SUSPEND_RESUME_TIME;
 	ret = bsm_msg_send(MV_SM_ID_POWER, &msg, sizeof(msg));
-	if (!ret)
+	if (ret < 0)
 		return ret;
 
 	ret = bsm_msg_recv(MV_SM_ID_POWER, rcv, &len);
-	if (!ret)
+	if (ret < 0)
 		return ret;
 
 	if (len != 8)
