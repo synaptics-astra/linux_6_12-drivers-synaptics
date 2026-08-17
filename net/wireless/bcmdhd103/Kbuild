@@ -1485,7 +1485,11 @@ endif
 _dhd_opt_path := $(BCMDHD_ROOT)/dhd.opt
 
 EXTRA_CFLAGS += $(DHDCFLAGS) -DDHD_DEBUG
+
+ifeq ($(CONFIG_ARCH_ASTRA),)
 EXTRA_CFLAGS += -DDHD_COMPILED=\"$(BCMDHD_ROOT)\"
+endif # !CONFIG_ARCH_ASTRA
+
 EXTRA_CFLAGS += -I$(BCMDHD_ROOT)/include/ -I$(BCMDHD_ROOT)/ -I $(BCMDHD_ROOT_OLD)/include -I $(BCMDHD_ROOT_OLD)/
 KBUILD_CFLAGS += -I$(LINUXDIR)/include -I$(CURDIR) -Wno-date-time -Wno-vla -Wno-error
 
