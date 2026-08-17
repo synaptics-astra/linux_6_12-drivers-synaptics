@@ -59,12 +59,27 @@ typedef enum VPP_PLANE_INFO_CFLAG_T_ {
 	VPP_PLANE_INFO_CFLAG_ALPHA,
 	VPP_PLANE_INFO_CFLAG_FRAMESIZE,
 }VPP_PLANE_INFO_CFLAG;
+
+#define VPP_PLANE_INFO_CFLAG_CNT_NBITS	3
+#define VPP_PLANE_INFO_CFLAG_CNT_MAX	((1u << VPP_PLANE_INFO_CFLAG_CNT_NBITS) - 1)
+
 #define IS_VPP_PLANE_INFO_CFLAG_SET(VAR, CHANGE_FLAG) \
-			  (VAR & (1 << VPP_PLANE_INFO_CFLAG_##CHANGE_FLAG))
+			((((VAR) >> (VPP_PLANE_INFO_CFLAG_##CHANGE_FLAG * VPP_PLANE_INFO_CFLAG_CNT_NBITS)) \
+			& VPP_PLANE_INFO_CFLAG_CNT_MAX) != 0)
+
 #define VPP_PLANE_INFO_CFLAG_SET(VAR, CHANGE_FLAG) \
-			  VAR |= (1 << VPP_PLANE_INFO_CFLAG_##CHANGE_FLAG)
+	do { unsigned int shift = VPP_PLANE_INFO_CFLAG_##CHANGE_FLAG * VPP_PLANE_INFO_CFLAG_CNT_NBITS, \
+		count = ((VAR) >> shift) & VPP_PLANE_INFO_CFLAG_CNT_MAX; \
+		(VAR) = ((VAR) & ~(VPP_PLANE_INFO_CFLAG_CNT_MAX << shift)) | \
+		((count < VPP_PLANE_INFO_CFLAG_CNT_MAX ? count + 1 : count) << shift); \
+	} while (0)
+
 #define VPP_PLANE_INFO_CFLAG_CLEAR(VAR, CHANGE_FLAG) \
-			  VAR &= ~(1 << VPP_PLANE_INFO_CFLAG_##CHANGE_FLAG)
+	do { unsigned int shift = VPP_PLANE_INFO_CFLAG_##CHANGE_FLAG * VPP_PLANE_INFO_CFLAG_CNT_NBITS, \
+		count = ((VAR) >> shift) & VPP_PLANE_INFO_CFLAG_CNT_MAX; \
+		(VAR) = ((VAR) & ~(VPP_PLANE_INFO_CFLAG_CNT_MAX << shift)) | \
+		((count > 0 ? count - 1 : count) << shift); \
+	} while (0)
 
 typedef struct vpp_plane_info_t{
 	unsigned int change_flag;
