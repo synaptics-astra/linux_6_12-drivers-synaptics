@@ -301,3 +301,46 @@ int syna_create_brightness_prop(struct drm_device *dev, struct drm_crtc *crtc)
 
 	return 0;
 }
+
+/*
+ * Validate the panel/display configuration.
+ *
+ * Returns -ENODEV if no display nodes are available.
+ * Returns 0 when a valid display is available.
+ *
+ * SL1620: At least one display (TFT or DSI) must be available.
+ *         If either TFT or DSI is present, validation succeeds.
+ *
+ * SL2610: DSI is the only display. If DSI is not available,
+ *         validation fails with -ENODEV.
+ */
+int syna_panel_check_availability(struct platform_device *pdev, struct device *mipi_dev)
+{
+	struct device_node *lcdc_node;
+	int lcdc_node_available = 0;
+	int mipi_node_available = 0;
+
+	if (!pdev || !mipi_dev)
+		return -EINVAL;
+
+	mipi_dev->of_node = of_find_compatible_node(NULL, NULL, SYNA_DRM_DSI_COMPATIBLE);
+
+	if (!mipi_dev->of_node || !of_device_is_available(mipi_dev->of_node))
+		DRM_DEBUG_DRIVER("DSI node is unavailable\n");
+	else
+		mipi_node_available = 1;
+
+	lcdc_node = of_find_compatible_node(NULL, NULL, SYNA_DRM_LCDC_COMPATIBLE);
+	if (!lcdc_node || !of_device_is_available(lcdc_node))
+		DRM_DEBUG_DRIVER("LCDC node is unavailable\n");
+	else
+		lcdc_node_available = 1;
+
+	of_node_put(lcdc_node);
+	of_node_put(mipi_dev->of_node);
+
+	if (!mipi_node_available && !lcdc_node_available)
+		return -ENODEV;
+
+	return 0;
+}

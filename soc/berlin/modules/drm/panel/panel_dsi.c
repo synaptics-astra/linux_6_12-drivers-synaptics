@@ -244,9 +244,9 @@ int syna_panel_dsi_init(struct platform_device *pdev)
 	if (!mipi_dev)
 		return -ENOMEM;
 
-	mipi_dev->of_node = of_find_compatible_node(NULL, NULL, "syna,drm-dsi");
-	if (!mipi_dev->of_node)
-		return -ENODEV;
+	/* Handle panel node disabled/un-available cases */
+	if ((err = syna_panel_check_availability(pdev, mipi_dev)))
+		return err;
 
 	dsi_panel = devm_kzalloc(&pdev->dev, sizeof(struct drm_panel), GFP_KERNEL);
 	if (!dsi_panel)

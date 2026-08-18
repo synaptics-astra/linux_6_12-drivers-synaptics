@@ -52,5 +52,6 @@ int syna_crtc_get_property(struct drm_crtc *crtc,
 				  struct drm_property *property,
 				  uint64_t *val);
 int syna_create_brightness_prop(struct drm_device *dev, struct drm_crtc *crtc);
+int syna_panel_check_availability(struct platform_device *pdev, struct device *mipi_dev);
 
 #endif /* !defined(__SYNA_DRM_PRIV_H__) */

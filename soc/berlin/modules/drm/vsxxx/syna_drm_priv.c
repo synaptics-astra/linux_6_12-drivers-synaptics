@@ -22,6 +22,34 @@
 #define IS_FORCE_GFX_FRAME_TO_PIP(plane, displayMode) \
 	((plane == PLANE_PIP) && (displayMode == VPP_VOUT_DUAL_MODE_PIP))
 
+/*
+ * Validate the DSI node for the configured display mode.
+ *
+ * DSI is mandatory in single-MIPI and dual-display modes.
+ * Return -ENODEV if the DSI node is unavailable in these modes.
+ * For other display modes, an unavailable DSI node is not an error.
+ */
+int syna_panel_check_availability(struct platform_device *pdev, struct device *mipi_dev)
+{
+	u32 display_mode = VPP_VOUT_SINGLE_MODE_PRI;
+	int mipi_node_available = 0;
+
+	mipi_dev->of_node = of_find_compatible_node(NULL, NULL, SYNA_DRM_DSI_COMPATIBLE);
+
+	if (!mipi_dev->of_node || !of_device_is_available(mipi_dev->of_node))
+		DRM_DEBUG_DRIVER("DSI node is unavailable\n");
+	else
+		mipi_node_available = 1;
+
+	of_property_read_u32(mipi_dev->of_node, "disp-mode", &display_mode);
+	of_node_put(mipi_dev->of_node);
+
+	if (display_mode != VPP_VOUT_SINGLE_MODE_PRI && !mipi_node_available)
+		return -ENODEV;
+
+	return 0;
+}
+
 static const ENUM_PLANE_ID syna_primary_plane_id[MAX_NUM_CPCBS] = {
 	PLANE_GFX1,
 #ifdef USE_DOLPHIN

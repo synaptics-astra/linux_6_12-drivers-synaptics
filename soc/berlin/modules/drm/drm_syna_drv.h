@@ -24,6 +24,9 @@
 #include "vpp_config.h"
 #include "vpp_fb.h"
 
+#define SYNA_DRM_DSI_COMPATIBLE	"syna,drm-dsi"
+#define SYNA_DRM_LCDC_COMPATIBLE	"syna,drm-lcdc"
+
 struct syna_gem_context;
 enum syna_crtc_flip_status;
 struct syna_flip_data;
