@@ -14,6 +14,7 @@ static struct dma_heap *dmabuf_nc_dma_heap;
 static char *dma_reserved_heaps[] = { "reserved", "linux,cma" };
 
 void VPP_DMABUF_FreeMemory(VPP_MEM *shm_handle);
+int is_ampless_boot(void);
 
 static int Dmabuf_GetDmaBufByName(char *heap_name, struct dma_heap **heap)
 {
@@ -128,7 +129,7 @@ int VPP_DMABUF_AllocMem(VPP_MEM_NODE *shm_node, VPP_MEM *shm_handle, gfp_t flags
 
 	if (shm_node->shm_type == VPP_MEM_TYPE_DMA) {
 		dmabuf_heap = dmabuf_dma_heap;
-	} else if (shm_node->shm_type == VPP_MEM_TYPE_NS_NC) {
+	} else if (!is_ampless_boot() && shm_node->shm_type == VPP_MEM_TYPE_NS_NC) {
 		dmabuf_heap = dmabuf_nc_dma_heap;
 	} else {
 		pr_err("%s: FAILED - Invalid shm type ..!!!\n", __func__);
@@ -148,12 +149,17 @@ int VPP_DMABUF_InitMemory(VPP_MEM_LIST *shm_list)
 		return ret;
 	}
 
+	//NS-NC not supported in ampless boot, So don't proceed.
+	if (is_ampless_boot())
+		goto ampless_init_done;
+
 	ret = VPP_DMABUF_InitMem_NonCached(0);
 	if (ret != VPP_MEM_ERROR_TYPE_OK) {
 		pr_err("%s: VPP_DMABUF_InitMem_NonCached FAILED ..!!!\n", __func__);
 		return ret;
 	}
 
+ampless_init_done:
 	return VPP_MEM_ERROR_TYPE_OK;
 }
 
