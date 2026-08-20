@@ -6,6 +6,24 @@
 #include <linux/module.h>
 #include "vpp_mem.h"
 
+static int vpp_mem_ampless_boot;
+
+/* Set by vpp driver; kept here (rather than queried back from vpp) to avoid
+ * a circular module dependency: vpp already depends on vpp_mem, so vpp_mem
+ * must not call back into vpp.
+ */
+void VPP_MEM_SetAmplessBoot(int ampless_boot)
+{
+	vpp_mem_ampless_boot = ampless_boot;
+}
+EXPORT_SYMBOL(VPP_MEM_SetAmplessBoot);
+
+int VPP_MEM_IsAmplessBoot(void)
+{
+	return vpp_mem_ampless_boot;
+}
+EXPORT_SYMBOL(VPP_MEM_IsAmplessBoot);
+
 int VPP_MEM_IsReady(void)
 {
 	int res;

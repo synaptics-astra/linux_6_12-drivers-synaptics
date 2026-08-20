@@ -77,6 +77,8 @@ typedef struct __VPP_MEM_OPS__ {
 
 
 int VPP_MEM_IsReady(void);
+void VPP_MEM_SetAmplessBoot(int ampless_boot);
+int VPP_MEM_IsAmplessBoot(void);
 void VPP_MEM_probe(VPP_MEM_LIST *shm_list);
 int VPP_MEM_InitMemory(VPP_MEM_LIST *shm_list);
 void VPP_MEM_DeInitMemory(VPP_MEM_LIST *shm_list);

@@ -15,6 +15,7 @@
 #include "avio_common.h"
 #include "hal_vpp_wrap.h"
 #include "kernel_compatibility.h"
+#include "vpp_mem.h"
 
 #define AVIO_VPP_CLK          "avio_vclk0"
 #define AVIO_VPP_DPICLK       "avio_dpiclk"
@@ -137,6 +138,11 @@ static void vpp_read_config(struct platform_device *pdev)
 	np = pdev->dev.of_node;
 	of_property_read_u32(np, "enable_ampless_boot",
 			&enable_ampless_boot);
+
+	/* Propagate to vpp_mem (vpp already depends on vpp_mem, so this
+	 * avoids vpp_mem calling back into vpp and creating a module cycle)
+	 */
+	VPP_MEM_SetAmplessBoot(enable_ampless_boot);
 
 	//Force recovery flow for ampless boot
 	vpp_force_enable_recovery(enable_ampless_boot);
