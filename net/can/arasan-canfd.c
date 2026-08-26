@@ -10,6 +10,7 @@
 
 #include <linux/bitfield.h>
 #include <linux/clk.h>
+#include <linux/dma-mapping.h>
 #include <linux/errno.h>
 #include <linux/ethtool.h>
 #include <linux/init.h>
@@ -117,7 +118,6 @@
 #define RX_HEADER0_DLC_MSK		GENMASK(24, 14)
 #define RX_HEADER0_ID_0_6		GENMASK(31, 25)
 #define RX_HEADER1_ID_7_10		GENMASK(3, 0)
-#define RX_HEADER1_EXTID		GENMASK(21, 4)
 #define RX_HEADER1_EXTID		GENMASK(21, 4)
 #define RX_HEADER2_CL_RTR		BIT(8)
 #define RX_HEADER2_CL_IDE		BIT(9)
@@ -287,14 +287,16 @@ static int arasan_canfd_set_bittiming(struct net_device *ndev)
 	arasan_canfd_write(priv, LVL_CLASSIC_END_OF_PROP_SEG, cl_2 - 1);
 	arasan_canfd_write(priv, LVL_CLASSIC_END_OF_PHASE_SEG1, classic_cycle * bt->sample_point / 1000);
 
-	fd_cycle = priv->can.clock.freq/dbt->bitrate;
-	fd_2 = fd_cycle / 2;
-	fd_4 = fd_cycle / 4;
-	arasan_canfd_write(priv, LVL_FD_BAUD, fd_cycle);
-	arasan_canfd_write(priv, LVL_ALLOWABLE_FD_JUMP, fd_2);
-	arasan_canfd_write(priv, LVL_FD_END_OF_SYNC_SEG, fd_4);
-	arasan_canfd_write(priv, LVL_FD_END_OF_PROP_SEG, fd_2 - 1);
-	arasan_canfd_write(priv, LVL_FD_END_OF_PHASE_SEG1, fd_cycle * dbt->sample_point / 1000);
+	if (priv->can.ctrlmode & CAN_CTRLMODE_FD) {
+		fd_cycle = priv->can.clock.freq/dbt->bitrate;
+		fd_2 = fd_cycle / 2;
+		fd_4 = fd_cycle / 4;
+		arasan_canfd_write(priv, LVL_FD_BAUD, fd_cycle);
+		arasan_canfd_write(priv, LVL_ALLOWABLE_FD_JUMP, fd_2);
+		arasan_canfd_write(priv, LVL_FD_END_OF_SYNC_SEG, fd_4);
+		arasan_canfd_write(priv, LVL_FD_END_OF_PROP_SEG, fd_2 - 1);
+		arasan_canfd_write(priv, LVL_FD_END_OF_PHASE_SEG1, fd_cycle * dbt->sample_point / 1000);
+	}
 
 	if (dbt->bitrate > 1000000)
 		arasan_canfd_write(priv, LVL_SSP_DELAY, priv->ssp);
@@ -302,11 +304,58 @@ static int arasan_canfd_set_bittiming(struct net_device *ndev)
 	return 0;
 }
 
+static void arasan_canfd_init(struct arasan_canfd_priv *priv)
+{
+	u32 val;
+	int i;
+
+	arasan_canfd_write(priv, INTERRUPT_MASK0, 0);
+	arasan_canfd_write(priv, INTERRUPT_MASK1, 0);
+
+	/* soft reset */
+	val = arasan_canfd_read(priv, CONTROL);
+	val |= (SOFTRESET | DMA_SOFTRESET);
+	arasan_canfd_write(priv, CONTROL, val);
+	udelay(1);
+	val &= ~(SOFTRESET | DMA_SOFTRESET);
+	arasan_canfd_write(priv, CONTROL, val);
+
+	/* setup features */
+	val |= LVL_ISOFD;
+	val &= ~DISABLE_ECC;
+	arasan_canfd_write(priv, CONTROL, val);
+	arasan_canfd_write(priv, SELF_ADDRESS, 0);
+	arasan_canfd_write(priv, ALLOWED_RETRANSMITS, 0);
+	arasan_canfd_write(priv, WATCHDOG_LIMIT, 0);
+
+	/* setup base registers */
+	arasan_canfd_write(priv, R_BASE_ADDR,
+			   priv->buf_dma + offsetof(struct can_buffer, r_buffer));
+	arasan_canfd_write(priv, R_ECC_ADDR,
+			   priv->buf_dma + offsetof(struct can_buffer, ecc_buffer.read));
+	arasan_canfd_write(priv, W_BASE_ADDR,
+			   priv->buf_dma + offsetof(struct can_buffer, w_buffer));
+	arasan_canfd_write(priv, W_ECC_ADDR,
+			   priv->buf_dma + offsetof(struct can_buffer, ecc_buffer.write));
+
+	/* setup RX buffers */
+	for (i = 0; i < CAN_MAX_RX_QUEUE; i++)
+		arasan_canfd_write(priv, RX_PTR_BUFS,
+				   priv->buf_dma + offsetof(struct can_buffer, w_buffer.rx_frames[i]));
+
+	/* setup filter buffers */
+	arasan_canfd_write(priv, NUMBER_OF_PAIRS, 0);
+	arasan_canfd_write(priv, BASE_ADDRESS,
+			   priv->buf_dma + offsetof(struct can_buffer, r_buffer.rx_filters[0]));
+}
+
 static int arasan_canfd_chip_start(struct net_device *ndev)
 {
 	struct arasan_canfd_priv *priv = netdev_priv(ndev);
 	u32 ier, ctrl, op = OPERATIONAL_EN;
 	int ret;
+
+	arasan_canfd_init(priv);
 
 	ret = arasan_canfd_set_bittiming(ndev);
 	if (ret < 0)
@@ -377,6 +426,7 @@ static void arasan_canfd_err_interrupt(struct net_device *ndev, u32 isr)
 
 	if (isr & ERROR_RX_FRAME) {
 		stats->rx_errors++;
+		cf.can_id |= CAN_ERR_PROT;
 		cf.data[2] |= CAN_ERR_PROT_FORM;
 	}
 
@@ -392,19 +442,24 @@ static void arasan_canfd_err_interrupt(struct net_device *ndev, u32 isr)
 		cf.data[3] |= CAN_ERR_PROT_LOC_ACK;
 	}
 
-	if (isr & BUS_STATE2) {
-		priv->can.state = CAN_STATE_BUS_OFF;
-		priv->can.can_stats.bus_off++;
+	if ((isr & BUS_STATE2) && priv->can.state != CAN_STATE_BUS_OFF) {
+		/* CAN_MODE_START requires the controller to be non-operational. */
+		arasan_canfd_write(priv, INTERRUPT_MASK0, 0);
+		arasan_canfd_write(priv, OPERATIONAL, 0);
+		can_change_state(ndev, &cf, CAN_STATE_BUS_OFF,
+				 CAN_STATE_BUS_OFF);
 		can_bus_off(ndev);
-		cf.can_id |= CAN_ERR_BUSOFF;
-	}
+	} else if ((isr & BUS_STATE1) &&
+		   priv->can.state != CAN_STATE_ERROR_PASSIVE &&
+		   priv->can.state != CAN_STATE_BUS_OFF) {
+		if (txerr > rxerr)
+			can_change_state(ndev, &cf, CAN_STATE_ERROR_PASSIVE,
+					 CAN_STATE_ERROR_ACTIVE);
+		else
+			can_change_state(ndev, &cf, CAN_STATE_ERROR_ACTIVE,
+					 CAN_STATE_ERROR_PASSIVE);
 
-	if (isr & BUS_STATE1) {
-		priv->can.state = CAN_STATE_ERROR_PASSIVE;
-		priv->can.can_stats.error_passive++;
-		cf.can_id |= CAN_ERR_CRTL | CAN_ERR_CNT;
-		cf.data[1] = txerr > rxerr ? CAN_ERR_CRTL_TX_PASSIVE :
-			CAN_ERR_CRTL_RX_PASSIVE;
+		cf.can_id |= CAN_ERR_CNT;
 		cf.data[6] = txerr;
 		cf.data[7] = rxerr;
 	}
@@ -416,19 +471,21 @@ static void arasan_canfd_err_interrupt(struct net_device *ndev, u32 isr)
 		if (skb) {
 			skb_cf->can_id |= cf.can_id;
 			memcpy(skb_cf->data, cf.data, CAN_ERR_DLC);
+			stats->rx_packets++;
+			stats->rx_bytes += CAN_ERR_DLC;
 			netif_rx(skb);
 		}
 	}
 }
 
-static void arasan_canfd_write_frame(struct net_device *ndev, struct sk_buff *skb, int idx)
+static int arasan_canfd_write_frame(struct net_device *ndev, struct sk_buff *skb, int idx)
 {
 	struct canfd_frame *cf = (struct canfd_frame *)skb->data;
 	struct arasan_canfd_priv *priv = netdev_priv(ndev);
-	struct can_tx_frame tx_frame;
+	struct can_tx_frame tx_frame = {};
 	u32 *data = (u32 *)&tx_frame;
 	u8 *ecc = priv->buf->ecc_buffer.read.tx_frames[idx];
-	int i;
+	int i, ret;
 
 	tx_frame.header.header0 = can_fd_len2dlc(cf->len);
 
@@ -436,7 +493,7 @@ static void arasan_canfd_write_frame(struct net_device *ndev, struct sk_buff *sk
 		/* Extended CAN ID format */
 		tx_frame.header.header0 |= TX_HEADER0_IDE;
 		tx_frame.header.header0 |= FIELD_PREP(TX_HEADER0_ID, (cf->can_id & CAN_EFF_MASK) >> 18);
-		tx_frame.header.ext_id = cf->can_id;
+		tx_frame.header.ext_id = cf->can_id & CAN_EFF_MASK;
 	} else {
 		/* Standard CAN ID format */
 		tx_frame.header.header0 |= FIELD_PREP(TX_HEADER0_ID, cf->can_id & CAN_SFF_MASK);
@@ -468,15 +525,22 @@ static void arasan_canfd_write_frame(struct net_device *ndev, struct sk_buff *sk
 		ecc[i] = ecc_calc(data[i]);
 	}
 
-	arasan_canfd_write(priv, HITXFIFO, priv->buf_dma + offsetof(struct can_buffer, r_buffer.tx_frames[idx]));
+	ret = can_put_echo_skb(skb, ndev, idx, 0);
+	if (ret)
+		return ret;
 
-	can_put_echo_skb(skb, ndev, idx % CAN_MAX_TX_QUEUE, 0);
+	/* Make the coherent visible before the TX doorbell. */
+	wmb();
+	arasan_canfd_write(priv, HITXFIFO,
+			   priv->buf_dma + offsetof(struct can_buffer, r_buffer.tx_frames[idx]));
+
+	return 0;
 }
 
 static int arasan_canfd_start_xmit_queue(struct sk_buff *skb, struct net_device *ndev)
 {
 	struct arasan_canfd_priv *priv = netdev_priv(ndev);
-	int idx;
+	int idx, ret;
 
 	guard(spinlock)(&priv->tx_lock);
 
@@ -485,8 +549,12 @@ static int arasan_canfd_start_xmit_queue(struct sk_buff *skb, struct net_device 
 		return -ENOSPC;
 
 	--idx;
-	priv->txq_avail &= ~(1 << idx);
-	arasan_canfd_write_frame(ndev, skb, idx);
+	priv->txq_avail &= ~BIT(idx);
+	ret = arasan_canfd_write_frame(ndev, skb, idx);
+	if (ret < 0) {
+		priv->txq_avail |= BIT(idx);
+		return ret;
+	}
 
 	/* Check if the TX queue is full */
 	if (!priv->txq_avail)
@@ -512,28 +580,55 @@ static netdev_tx_t arasan_canfd_start_xmit(struct sk_buff *skb, struct net_devic
 	return NETDEV_TX_OK;
 }
 
-static int arasan_canfd_tx(struct net_device *ndev, unsigned long addr)
+static int arasan_canfd_addr_to_idx(dma_addr_t addr, dma_addr_t base,
+				    size_t frame_size, unsigned int count)
+{
+	dma_addr_t offset;
+
+	if (addr < base)
+		return -EINVAL;
+
+	offset = addr - base;
+	if (offset >= frame_size * count || offset % frame_size)
+		return -EINVAL;
+
+	return offset / frame_size;
+}
+
+static int arasan_canfd_tx(struct net_device *ndev, dma_addr_t addr, bool aborted)
 {
 	struct arasan_canfd_priv *priv = netdev_priv(ndev);
 	struct net_device_stats *stats = &ndev->stats;
+	dma_addr_t base;
 	int idx;
+
+	base = priv->buf_dma + offsetof(struct can_buffer, r_buffer.tx_frames);
+	idx = arasan_canfd_addr_to_idx(addr, base, sizeof(struct can_tx_frame), CAN_MAX_TX_QUEUE);
+	if (idx < 0)
+		return idx;
 
 	guard(spinlock)(&priv->tx_lock);
 
-	idx = (addr - priv->buf_dma - offsetof(struct can_buffer, r_buffer.tx_frames)) / sizeof(struct can_tx_frame);
-	if (idx > CAN_MAX_TX_QUEUE)
-		return 0;
+	/* Reject duplicate or stale completions for an already-free slot. */
+	if (priv->txq_avail & BIT(idx))
+		return -EINVAL;
 
-	stats->tx_bytes += can_get_echo_skb(ndev, idx % CAN_MAX_TX_QUEUE, NULL);
-	stats->tx_packets++;
-	priv->txq_avail |= (1 << idx);
+	if (aborted) {
+		can_free_echo_skb(ndev, idx, NULL);
+		stats->tx_errors++;
+		stats->tx_aborted_errors++;
+	} else {
+		stats->tx_bytes += can_get_echo_skb(ndev, idx, NULL);
+		stats->tx_packets++;
+	}
+	priv->txq_avail |= BIT(idx);
 
 	netif_wake_queue(ndev);
 
 	return 1;
 }
 
-static int arasan_canfd_rx(struct net_device *ndev, unsigned long addr)
+static int arasan_canfd_rx(struct net_device *ndev, dma_addr_t addr)
 {
 	struct arasan_canfd_priv *priv = netdev_priv(ndev);
 	struct net_device_stats *stats = &ndev->stats;
@@ -541,11 +636,14 @@ static int arasan_canfd_rx(struct net_device *ndev, unsigned long addr)
 	struct sk_buff *skb;
 	u32 header0, header1, header2;
 	struct can_rx_frame *rx_frame;
-	int idx, type;
+	unsigned int type;
+	dma_addr_t base;
+	int idx;
 
-	idx = (addr - priv->buf_dma - offsetof(struct can_buffer, w_buffer.rx_frames)) / sizeof(struct can_rx_frame);
-	if (idx > CAN_MAX_RX_QUEUE)
-		return 0;
+	base = priv->buf_dma + offsetof(struct can_buffer, w_buffer.rx_frames);
+	idx = arasan_canfd_addr_to_idx(addr, base, sizeof(struct can_rx_frame), CAN_MAX_RX_QUEUE);
+	if (idx < 0)
+		return idx;
 
 	rx_frame = &priv->buf->w_buffer.rx_frames[idx];
 	header0 = rx_frame->header.header0;
@@ -553,14 +651,22 @@ static int arasan_canfd_rx(struct net_device *ndev, unsigned long addr)
 	header2 = rx_frame->header.header2;
 
 	type = FIELD_GET(RX_HEADER0_TYPE_MSK, header0);
-	if (type == RX_HEADER0_TYPE_FD)
+	if (type == RX_HEADER0_TYPE_FD) {
 		skb = alloc_canfd_skb(ndev, &cf);
-	else
+	} else if (type == RX_HEADER0_TYPE_CL) {
 		skb = alloc_can_skb(ndev, (struct can_frame **)&cf);
+	} else {
+		stats->rx_errors++;
+		if (printk_ratelimit())
+			netdev_err(ndev, "invalid RX frame type: %u\n", type);
+		return 1;
+	}
 
 	if (unlikely(!skb)) {
+		if (printk_ratelimit())
+			netdev_notice(ndev, "packet dropped\n");
 		stats->rx_dropped++;
-		return 0;
+		return 1;
 	}
 
 	if (type == RX_HEADER0_TYPE_FD) {
@@ -578,11 +684,13 @@ static int arasan_canfd_rx(struct net_device *ndev, unsigned long addr)
 	if (header0 & RX_HEADER0_B_EXT) {
 		/* The received frame is an Extended format frame */
 		cf->can_id = FIELD_GET(RX_HEADER1_EXTID, header1);
-		cf->can_id |= (FIELD_GET(RX_HEADER0_ID_0_6, header0) | (FIELD_GET(RX_HEADER1_ID_7_10, header1) << 7) << 18);
+		cf->can_id |= ((FIELD_GET(RX_HEADER0_ID_0_6, header0) |
+			       (FIELD_GET(RX_HEADER1_ID_7_10, header1) << 7)) << 18);
 		cf->can_id |= CAN_EFF_FLAG;
 	} else {
 		/* The received frame is a standard format frame */
-		cf->can_id = FIELD_GET(RX_HEADER0_ID_0_6, header0) | (FIELD_GET(RX_HEADER1_ID_7_10, header1) << 7);
+		cf->can_id = FIELD_GET(RX_HEADER0_ID_0_6, header0) |
+			     (FIELD_GET(RX_HEADER1_ID_7_10, header1) << 7);
 	}
 	if (header0 & RX_HEADER0_B_RTR)
 		cf->can_id |= CAN_RTR_FLAG;
@@ -603,36 +711,59 @@ static int arasan_canfd_poll(struct napi_struct *napi, int quota)
 	struct net_device *ndev = napi->dev;
 	struct arasan_canfd_priv *priv = netdev_priv(ndev);
 	u32 buf_cnt, ier;
-	int type, work_done = 0;
-	unsigned long addr;
+	int ret, type, work_done = 0;
+	dma_addr_t addr;
 
 	while ((buf_cnt = arasan_canfd_read(priv, USED_BUFS_PTR_COUNT)) > 0 &&
 	       (work_done < quota)) {
 		addr = arasan_canfd_read(priv, USED_BUFS_PTR);
 		type = FIELD_GET(TYPE_MASK, addr);
 		addr &= ~TYPE_MASK;
+		rmb();
 		switch (type) {
 		case TYPE_RX:
-			work_done += arasan_canfd_rx(ndev, addr);
-			arasan_canfd_write(priv, RX_PTR_BUFS, addr);
+			ret = arasan_canfd_rx(ndev, addr);
+			if (ret > 0) {
+				arasan_canfd_write(priv, RX_PTR_BUFS, addr);
+			} else {
+				if (printk_ratelimit())
+					netdev_err(ndev,
+						   "invalid RX buffer address %pad\n", &addr);
+			}
 			break;
 		case TYPE_TX:
-			work_done += arasan_canfd_tx(ndev, addr);
+			ret = arasan_canfd_tx(ndev, addr, false);
+			if (ret < 0) {
+				if (printk_ratelimit())
+					netdev_err(ndev,
+						   "invalid TX completion address %pad\n", &addr);
+			}
 			break;
 		case TYPE_TX_ABORT:
-			netdev_err(ndev, "tx abort\n");
+			if (printk_ratelimit())
+				netdev_err(ndev, "tx abort\n");
+			ret = arasan_canfd_tx(ndev, addr, true);
+			if (ret < 0) {
+				if (printk_ratelimit())
+					netdev_err(ndev,
+						   "invalid TX abort address %pad\n", &addr);
+			}
 			break;
 		default:
-			netdev_err(ndev, "Unknown type: %d\n", type);
+			if (printk_ratelimit())
+				netdev_err(ndev, "Unknown type: %d\n", type);
 			break;
 		}
+		++work_done;
 	}
 
 	if (work_done < quota) {
 		if (napi_complete_done(napi, work_done)) {
-			ier = arasan_canfd_read(priv, INTERRUPT_MASK0);
-			ier |= USED_BUFFERS_NOT_EMPTY;
-			arasan_canfd_write(priv, INTERRUPT_MASK0, ier);
+			if (priv->can.state != CAN_STATE_BUS_OFF) {
+				ier = arasan_canfd_read(priv, INTERRUPT_MASK0);
+				ier |= USED_BUFFERS_NOT_EMPTY;
+				arasan_canfd_write(priv, INTERRUPT_MASK0, ier);
+			}
 		}
 	}
 	return work_done;
@@ -670,6 +801,7 @@ static void arasan_canfd_chip_stop(struct net_device *ndev)
 {
 	struct arasan_canfd_priv *priv = netdev_priv(ndev);
 
+	arasan_canfd_write(priv, INTERRUPT_MASK0, 0);
 	arasan_canfd_write(priv, OPERATIONAL, 0);
 	priv->can.state = CAN_STATE_STOPPED;
 }
@@ -683,39 +815,42 @@ static int arasan_canfd_open(struct net_device *ndev)
 	if (ret)
 		return ret;
 
-	ret = pm_runtime_get_sync(priv->dev);
+	ret = pm_runtime_resume_and_get(priv->dev);
 	if (ret < 0) {
 		netdev_err(ndev, "%s: pm_runtime_get failed(%d)\n", __func__, ret);
-		goto err;
+		goto err_phy;
 	}
 
 	ret = request_irq(ndev->irq, arasan_canfd_isr, 0, ndev->name, ndev);
 	if (ret < 0) {
 		netdev_err(ndev, "Failed to request irq\n");
-		goto err;
+		goto err_pm;
 	}
 
 	ret = open_candev(ndev);
 	if (ret)
 		goto err_irq;
 
+	napi_enable(&priv->napi);
+
 	ret = arasan_canfd_chip_start(ndev);
 	if (ret < 0) {
 		netdev_err(ndev, "arasan_canfd_chip_start failed!\n");
-		goto err_candev;
+		goto err_napi;
 	}
 
-	napi_enable(&priv->napi);
 	netif_start_queue(ndev);
 
 	return 0;
 
-err_candev:
+err_napi:
+	napi_disable(&priv->napi);
 	close_candev(ndev);
 err_irq:
 	free_irq(ndev->irq, ndev);
-err:
+err_pm:
 	pm_runtime_put(priv->dev);
+err_phy:
 	phy_power_off(priv->transceiver);
 
 	return ret;
@@ -726,8 +861,9 @@ static int arasan_canfd_close(struct net_device *ndev)
 	struct arasan_canfd_priv *priv = netdev_priv(ndev);
 
 	netif_stop_queue(ndev);
-	napi_disable(&priv->napi);
 	arasan_canfd_chip_stop(ndev);
+	synchronize_irq(ndev->irq);
+	napi_disable(&priv->napi);
 	free_irq(ndev->irq, ndev);
 	close_candev(ndev);
 
@@ -744,10 +880,9 @@ static int arasan_canfd_get_berr_counter(const struct net_device *ndev,
 	int ret;
 	u32 val;
 
-	ret = pm_runtime_get_sync(priv->dev);
+	ret = pm_runtime_resume_and_get(priv->dev);
 	if (ret < 0) {
 		netdev_err(ndev, "%s: pm_runtime_get failed(%d)\n", __func__, ret);
-		pm_runtime_put(priv->dev);
 		return ret;
 	}
 
@@ -758,42 +893,6 @@ static int arasan_canfd_get_berr_counter(const struct net_device *ndev,
 	pm_runtime_put(priv->dev);
 
 	return 0;
-}
-
-static void arasan_canfd_init(struct arasan_canfd_priv *priv)
-{
-	u32 val;
-	int i;
-
-	/* soft reset */
-	val = arasan_canfd_read(priv, CONTROL);
-	val |= (SOFTRESET | DMA_SOFTRESET);
-	arasan_canfd_write(priv, CONTROL, val);
-	udelay(1);
-	val &= ~(SOFTRESET | DMA_SOFTRESET);
-	arasan_canfd_write(priv, CONTROL, val);
-
-	/* setup features */
-	val |= LVL_ISOFD;
-	val &= ~DISABLE_ECC;
-	arasan_canfd_write(priv, CONTROL, val);
-	arasan_canfd_write(priv, SELF_ADDRESS, 0);
-	arasan_canfd_write(priv, ALLOWED_RETRANSMITS, 0);
-	arasan_canfd_write(priv, WATCHDOG_LIMIT, 0);
-
-	/* setup base registers */
-	arasan_canfd_write(priv, R_BASE_ADDR, priv->buf_dma + offsetof(struct can_buffer, r_buffer));
-	arasan_canfd_write(priv, R_ECC_ADDR, priv->buf_dma + offsetof(struct can_buffer, ecc_buffer.read));
-	arasan_canfd_write(priv, W_BASE_ADDR, priv->buf_dma + offsetof(struct can_buffer, w_buffer));
-	arasan_canfd_write(priv, W_ECC_ADDR, priv->buf_dma + offsetof(struct can_buffer, ecc_buffer.write));
-
-	/* setup RX buffers */
-	for (i = 0; i < CAN_MAX_RX_QUEUE; i++)
-		arasan_canfd_write(priv, RX_PTR_BUFS, priv->buf_dma + offsetof(struct can_buffer, w_buffer.rx_frames[i]));
-
-	/* setup filter buffers */
-	arasan_canfd_write(priv, NUMBER_OF_PAIRS, 0);
-	arasan_canfd_write(priv, BASE_ADDRESS, priv->buf_dma + offsetof(struct can_buffer, r_buffer.rx_filters[0]));
 }
 
 static const struct net_device_ops arasan_canfd_netdev_ops = {
@@ -810,14 +909,29 @@ static const struct ethtool_ops arasan_canfd_ethtool_ops = {
 static int arasan_canfd_suspend(struct device *dev)
 {
 	struct net_device *ndev = dev_get_drvdata(dev);
+	struct arasan_canfd_priv *priv = netdev_priv(ndev);
+	int ret;
 
 	if (netif_running(ndev)) {
-		netif_stop_queue(ndev);
 		netif_device_detach(ndev);
+		netif_stop_queue(ndev);
+		disable_irq(ndev->irq);
+		napi_disable(&priv->napi);
 		arasan_canfd_chip_stop(ndev);
+		can_flush_echo_skb(ndev);
 	}
 
-	return pm_runtime_force_suspend(dev);
+	ret = pm_runtime_force_suspend(dev);
+	if (ret && netif_running(ndev)) {
+		if (!arasan_canfd_chip_start(ndev)) {
+			napi_enable(&priv->napi);
+			enable_irq(ndev->irq);
+			netif_device_attach(ndev);
+			netif_start_queue(ndev);
+		}
+	}
+
+	return ret;
 }
 
 static int arasan_canfd_resume(struct device *dev)
@@ -832,15 +946,16 @@ static int arasan_canfd_resume(struct device *dev)
 		return ret;
 	}
 
-	arasan_canfd_init(priv);
-
 	if (netif_running(ndev)) {
 		ret = arasan_canfd_chip_start(ndev);
 		if (ret) {
 			dev_err(dev, "arasan_canfd_chip_start failed on resume\n");
+			pm_runtime_force_suspend(dev);
 			return ret;
 		}
 
+		napi_enable(&priv->napi);
+		enable_irq(ndev->irq);
 		netif_device_attach(ndev);
 		netif_start_queue(ndev);
 	}
@@ -896,6 +1011,10 @@ static int arasan_canfd_probe(struct platform_device *pdev)
 	addr = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(addr))
 		return PTR_ERR(addr);
+
+	ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
+	if (ret)
+		return ret;
 
 	ndev = alloc_candev(sizeof(struct arasan_canfd_priv), CAN_MAX_TX_QUEUE);
 	if (!ndev)
@@ -957,10 +1076,10 @@ static int arasan_canfd_probe(struct platform_device *pdev)
 	priv->base = addr;
 
 	pm_runtime_enable(&pdev->dev);
-	ret = pm_runtime_get_sync(&pdev->dev);
+	ret = pm_runtime_resume_and_get(&pdev->dev);
 	if (ret < 0) {
 		netdev_err(ndev, "%s: pm_runtime_get failed(%d)\n", __func__, ret);
-		goto err_disableclks;
+		goto err_disablepm;
 	}
 
 	priv->buf = dmam_alloc_coherent(&pdev->dev, sizeof(*priv->buf), &priv->buf_dma, GFP_KERNEL);
@@ -984,8 +1103,6 @@ static int arasan_canfd_probe(struct platform_device *pdev)
 
 	netif_napi_add_weight(ndev, &priv->napi, arasan_canfd_poll, ARASAN_CANFD_NAPI_WEIGHT);
 
-	arasan_canfd_init(priv);
-
 	ret = register_candev(ndev);
 	if (ret) {
 		dev_err(&pdev->dev, "fail to register failed (err=%d)\n", ret);
@@ -1000,7 +1117,8 @@ static int arasan_canfd_probe(struct platform_device *pdev)
 err_napidel:
 	netif_napi_del(&priv->napi);
 err_disableclks:
-	pm_runtime_put(priv->dev);
+	pm_runtime_put_sync(priv->dev);
+err_disablepm:
 	pm_runtime_disable(&pdev->dev);
 err_reset:
 	reset_control_assert(priv->can_rst);
@@ -1017,9 +1135,11 @@ static void arasan_canfd_remove(struct platform_device *pdev)
 	struct net_device *ndev = platform_get_drvdata(pdev);
 	struct arasan_canfd_priv *priv = netdev_priv(ndev);
 
+	pm_runtime_resume_and_get(&pdev->dev);
+	pm_runtime_disable(&pdev->dev);
+	pm_runtime_put_noidle(&pdev->dev);
 	unregister_candev(ndev);
 	netif_napi_del(&priv->napi);
-	pm_runtime_disable(&pdev->dev);
 	reset_control_assert(priv->sys_rst);
 	reset_control_assert(priv->can_rst);
 	free_candev(ndev);
