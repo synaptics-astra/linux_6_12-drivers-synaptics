@@ -55,11 +55,6 @@
 #define RA_TspIntReg_software_int_status	0x002C
 #define RA_TspIntReg_software_int_enable    0x0028
 
-enum m2m_feed_mode {
-	M2M_FEED_MODE_SYNC,
-	M2M_FEED_MODE_ASYNC,
-};
-
 struct m2m_session {
 	int sess_id;
 	enum m2m_feed_mode fmode;
@@ -69,6 +64,7 @@ struct m2m_session {
 
 	TEEC_Session teec_sess;
 	bool teec_sess_opened;
+	struct m2m_key_iv_info key_iv_info;
 	struct task_struct *task;
 
 	/* for async mode */
@@ -81,7 +77,6 @@ struct m2m_session {
 	struct list_head node;
 	pid_t pid;
 	pid_t tid;
-
 };
 
 struct m2m_device_t {
@@ -217,9 +212,51 @@ static int sess_pop_cmd(struct m2m_session *sess, int pop_nr)
 	return real_pop_nr;
 }
 
+
+static void m2m_session_destroy(struct m2m_session *sess)
+{
+	int pop_nr;
+
+	m2m_enter_func();
+	pop_nr = sess_pop_cmd(sess, 0);
+	if (pop_nr) {
+		pr_err("err: still remain unfinished cmds[%d:%d] when relase m2m sess\n",
+			pop_nr, sess->finished_cmdnr);
+		if (sess->fmode == M2M_FEED_MODE_SYNC)
+			up(&sess->m2m_sem);
+	}
+
+	mutex_lock(&sess->m2m_mutex);
+	if (sess->teec_sess_opened) {
+		m2m_wrapper_close_session(&sess->teec_sess);
+		sess->teec_sess_opened = false;
+	}
+
+	down_write(&m2m_device.rwsem);
+	list_del(&sess->node);
+	up_write(&m2m_device.rwsem);
+
+	if (sess->task)
+		put_task_struct(sess->task);
+
+	mutex_unlock(&sess->m2m_mutex);
+
+	if (sess->key_iv_info.pCryptoSM)
+		m2m_wrapper_free(sess->key_iv_info.pCryptoSM);
+	if (sess->key_iv_info.pKeyInfoSM)
+		m2m_wrapper_free(sess->key_iv_info.pKeyInfoSM);
+	if (sess->key_iv_info.pKeySM)
+		m2m_wrapper_free(sess->key_iv_info.pKeySM);
+	if (sess->key_iv_info.pIVSM)
+		m2m_wrapper_free(sess->key_iv_info.pIVSM);
+
+	kfree(sess);
+}
+
 static struct m2m_session *m2m_session_create(void)
 {
 	struct m2m_session *sess;
+	int ret;
 
 	m2m_enter_func();
 	sess = kzalloc(sizeof(*sess), GFP_KERNEL);
@@ -249,37 +286,32 @@ static struct m2m_session *m2m_session_create(void)
 	list_add_tail(&sess->node, &m2m_device.sess_list);
 	up_write(&m2m_device.rwsem);
 
+
+	ret = m2m_wrapper_alloc(sizeof(struct drm_crypto_info), (void **)&sess->key_iv_info.pCryptoSM);
+	if (ret) {
+		pr_err("fail to alloc drm crypto shm 0x%zx\n", sizeof(struct drm_crypto_info));
+		goto error;
+	}
+	ret = m2m_wrapper_alloc(sizeof(struct m2m_key_info), (void **)&sess->key_iv_info.pKeyInfoSM);
+	if (ret) {
+		pr_err("fail to alloc key info shm 0x%zx\n", sizeof(struct m2m_key_info));
+		goto error;
+	}
+	ret = m2m_wrapper_alloc(M2M_MAX_KEY_LENGTH, (void **)&sess->key_iv_info.pKeySM);
+	if (ret) {
+		pr_err("fail to alloc key data shm %d\n", M2M_MAX_KEY_LENGTH);
+		goto error;
+	}
+	ret = m2m_wrapper_alloc(M2M_MAX_KEY_LENGTH, (void **)&sess->key_iv_info.pIVSM);
+	if (ret) {
+		pr_err("fail to alloc iv data shm %d\n", M2M_MAX_KEY_LENGTH);
+		goto error;
+	}
+
 	return sess;
-}
-
-static void m2m_session_destroy(struct m2m_session *sess)
-{
-	int pop_nr;
-
-	m2m_enter_func();
-	pop_nr = sess_pop_cmd(sess, 0);
-	if (pop_nr) {
-		pr_err("err: still remain unfinished cmds[%d:%d] when relase m2m sess\n",
-			pop_nr, sess->finished_cmdnr);
-		if (sess->fmode == M2M_FEED_MODE_SYNC)
-			up(&sess->m2m_sem);
-	}
-
-	mutex_lock(&sess->m2m_mutex);
-	if (sess->teec_sess_opened) {
-		m2m_wrapper_close_session(&sess->teec_sess);
-		sess->teec_sess_opened = false;
-	}
-
-	down_write(&m2m_device.rwsem);
-	list_del(&sess->node);
-	up_write(&m2m_device.rwsem);
-
-	if (sess->task)
-		put_task_struct(sess->task);
-
-	mutex_unlock(&sess->m2m_mutex);
-	kfree(sess);
+error:
+	m2m_session_destroy(sess);
+	return ERR_PTR(ret);
 }
 
 static int m2m_set_mode(struct m2m_session *sess, enum m2m_crypto_mode mode)
@@ -342,7 +374,7 @@ static int m2m_set_key(struct m2m_session *sess, struct m2m_key *config)
 		goto end;
 	}
 
-	ret = m2m_wrapper_config(&sess->teec_sess, config);
+	ret = m2m_wrapper_config(&sess->teec_sess, config, &sess->key_iv_info);
 	if (ret)
 		pr_err("m2m_wrapper_config failed %d\n", ret);
 

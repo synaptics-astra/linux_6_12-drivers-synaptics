@@ -40,22 +40,6 @@ enum {
 	M2M_CMD_MAX
 };
 
-struct drm_crypto_info {
-	uint32_t  uiSchemeType;                   /**< The Scheme type of DRM */
-	uint32_t  uiSessionID;                    /**< The identify of Session */
-	uint8_t   uiKeyID[M2M_MAX_KEY_ID_LENGTH]; /**< The identify Key */
-	uint32_t  uiKeyIdLen;                     /**< The length of key id */
-};
-
-struct m2m_key_info {
-	uint32_t  uiKeyOption;
-	uint32_t  uiKeyLength;
-	uint32_t  uiKeyTblIndex;
-	uint32_t  uiIVOption;
-	uint32_t  uiIVLength;
-	uint32_t  uiIVTblIndex;
-};
-
 struct syna_dmaheap_buf {
 	struct dma_buf *dmabuf;
 	uint32_t memid;
@@ -140,7 +124,7 @@ static int tz_m2m_crypto_init(TEEC_Session *teec_sess)
 	return ret;
 }
 
-static int m2m_wrapper_alloc(unsigned int len, void **handle)
+int m2m_wrapper_alloc(unsigned int len, void **handle)
 {
 	struct tee_shm *shm;
 
@@ -154,7 +138,7 @@ static int m2m_wrapper_alloc(unsigned int len, void **handle)
 	return 0;
 }
 
-static void m2m_wrapper_free(void *handle)
+void m2m_wrapper_free(void *handle)
 {
 	tee_shm_free(handle);
 }
@@ -383,48 +367,21 @@ end:
 	return ret;
 }
 
-int m2m_wrapper_config(TEEC_Session *teec_sess, struct m2m_key *key_config)
+int m2m_wrapper_config(TEEC_Session *teec_sess, struct m2m_key *key_config, struct m2m_key_iv_info *ses_key_iv_info)
 {
 	int ret = 0;
 	struct tee_ioctl_invoke_arg arg;
 	struct tee_param param[4] = {0};
-
-	struct tee_shm *pCryptoSM = NULL;
-	struct tee_shm *pKeyInfoSM = NULL;
-	struct tee_shm *pKeySM = NULL;
-	struct tee_shm *pIVSM = NULL;
-
 	struct m2m_key_info *pKeyInfo;
 	struct drm_crypto_info *pCryptoInfo;
 	int KeyDataParam = TEE_IOCTL_PARAM_ATTR_TYPE_NONE;
 	int IVDataParam = TEE_IOCTL_PARAM_ATTR_TYPE_NONE;
 
-	ret = m2m_wrapper_alloc(sizeof(struct drm_crypto_info), (void **)&pCryptoSM);
-	if (ret) {
-		pr_err("fail to alloc drm crypto shm 0x%zx\n", sizeof(struct drm_crypto_info));
-		goto end;
-	}
-	ret = m2m_wrapper_alloc(sizeof(struct m2m_key_info), (void **)&pKeyInfoSM);
-	if (ret) {
-		pr_err("fail to alloc key info shm 0x%zx\n", sizeof(struct m2m_key_info));
-		goto end;
-	}
-	ret = m2m_wrapper_alloc(M2M_MAX_KEY_LENGTH, (void **)&pKeySM);
-	if (ret) {
-		pr_err("fail to alloc key data shm %d\n", M2M_MAX_KEY_LENGTH);
-		goto end;
-	}
-	ret = m2m_wrapper_alloc(M2M_MAX_KEY_LENGTH, (void **)&pIVSM);
-	if (ret) {
-		pr_err("fail to alloc iv data shm %d\n", M2M_MAX_KEY_LENGTH);
-		goto end;
-	}
-
 	/* Use TEE Client API to register the underlying memory buffer. */
 	if (key_config->key_option == M2M_KEY_CONTENT) {
 		KeyDataParam = TEE_IOCTL_PARAM_ATTR_TYPE_MEMREF_INPUT;
-		if (unlikely(key_config->key_length <= pKeySM->size)) {
-			memcpy(pKeySM->kaddr, key_config->key_data, key_config->key_length);
+		if (unlikely(key_config->key_length <= ses_key_iv_info->pKeySM->size)) {
+			memcpy(ses_key_iv_info->pKeySM->kaddr, key_config->key_data, key_config->key_length);
 		} else {
 			pr_err("Key size is too long\n");
 			ret =  -EINVAL;
@@ -434,8 +391,8 @@ int m2m_wrapper_config(TEEC_Session *teec_sess, struct m2m_key *key_config)
 
 	if (key_config->iv_option == M2M_KEY_CONTENT) {
 		IVDataParam = TEE_IOCTL_PARAM_ATTR_TYPE_MEMREF_INPUT;
-		if (likely(key_config->iv_length <= pIVSM->size)) {
-			memcpy(pIVSM->kaddr, key_config->iv_data, key_config->iv_length);
+		if (likely(key_config->iv_length <= ses_key_iv_info->pIVSM->size)) {
+			memcpy(ses_key_iv_info->pIVSM->kaddr, key_config->iv_data, key_config->iv_length);
 		} else {
 			pr_err("IV size is too long\n");
 			ret =  -EINVAL;
@@ -443,13 +400,13 @@ int m2m_wrapper_config(TEEC_Session *teec_sess, struct m2m_key *key_config)
 		}
 	}
 
-	pCryptoInfo = (struct drm_crypto_info *)pCryptoSM->kaddr;
+	pCryptoInfo = (struct drm_crypto_info *)ses_key_iv_info->pCryptoSM->kaddr;
 	pCryptoInfo->uiSchemeType = key_config->drm_info.scheme_type;
 	pCryptoInfo->uiSessionID = key_config->drm_info.session_id;
 	pCryptoInfo->uiKeyIdLen = key_config->drm_info.key_id_length;
 	memcpy(pCryptoInfo->uiKeyID, key_config->drm_info.key_id, M2M_MAX_KEY_ID_LENGTH);
 
-	pKeyInfo = (struct m2m_key_info *)pKeyInfoSM->kaddr;
+	pKeyInfo = (struct m2m_key_info *)ses_key_iv_info->pKeyInfoSM->kaddr;
 	pKeyInfo->uiKeyOption = key_config->key_option;
 	pKeyInfo->uiKeyLength = key_config->key_length;
 	pKeyInfo->uiKeyTblIndex = key_config->key_index;
@@ -457,25 +414,24 @@ int m2m_wrapper_config(TEEC_Session *teec_sess, struct m2m_key *key_config)
 	pKeyInfo->uiIVLength = key_config->iv_length;
 	pKeyInfo->uiIVTblIndex = key_config->iv_index;
 
-
 	param[0].attr = KeyDataParam;
-	param[0].u.memref.shm = pKeySM;
-	param[0].u.memref.size = pKeySM->size;
+	param[0].u.memref.shm = ses_key_iv_info->pKeySM;
+	param[0].u.memref.size = ses_key_iv_info->pKeySM->size;
 	param[0].u.memref.shm_offs = 0;
 
 	param[1].attr = IVDataParam;
-	param[1].u.memref.shm = pIVSM;
-	param[1].u.memref.size = pIVSM->size;
+	param[1].u.memref.shm = ses_key_iv_info->pIVSM;
+	param[1].u.memref.size = ses_key_iv_info->pIVSM->size;
 	param[1].u.memref.shm_offs = 0;
 
 	param[2].attr = TEE_IOCTL_PARAM_ATTR_TYPE_MEMREF_INPUT;
-	param[2].u.memref.shm = pCryptoSM;
-	param[2].u.memref.size = pCryptoSM->size;
+	param[2].u.memref.shm = ses_key_iv_info->pCryptoSM;
+	param[2].u.memref.size = ses_key_iv_info->pCryptoSM->size;
 	param[2].u.memref.shm_offs = 0;
 
 	param[3].attr = TEE_IOCTL_PARAM_ATTR_TYPE_MEMREF_INPUT;
-	param[3].u.memref.shm = pKeyInfoSM;
-	param[3].u.memref.size = pKeyInfoSM->size;
+	param[3].u.memref.shm = ses_key_iv_info->pKeyInfoSM;
+	param[3].u.memref.size = ses_key_iv_info->pKeyInfoSM->size;
 	param[3].u.memref.shm_offs = 0;
 
 	arg.func = M2M_Setkey;
@@ -490,18 +446,6 @@ int m2m_wrapper_config(TEEC_Session *teec_sess, struct m2m_key *key_config)
 		goto end;
 	}
 end:
-	if (pKeySM)
-		m2m_wrapper_free(pKeySM);
-
-	if (pIVSM)
-		m2m_wrapper_free(pIVSM);
-
-	if (pCryptoSM)
-		m2m_wrapper_free(pCryptoSM);
-
-	if (pKeyInfoSM)
-		m2m_wrapper_free(pKeyInfoSM);
-
 	return ret;
 }
 

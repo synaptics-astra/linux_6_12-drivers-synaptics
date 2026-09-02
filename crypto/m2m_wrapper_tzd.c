@@ -21,11 +21,6 @@ static TEEC_UUID m2m_ta_uuid = TA_M2M_UUID;
 static TEEC_Context teec_ctx;
 static bool ctx_created;
 
-static TEEC_SharedMemory *pCryptoSM;
-static TEEC_SharedMemory *pKeyInfoSM;
-static TEEC_SharedMemory *pKeySM;
-static TEEC_SharedMemory *pIVSM;
-
 enum {
 	M2M_INVALID,
 	M2M_CryptoInit,
@@ -40,22 +35,6 @@ enum {
 	M2M_SetResidueMode,
 	M2M_SetIVPolicy,
 	M2M_CMD_MAX
-};
-
-struct drm_crypto_info {
-	uint32_t  uiSchemeType;                   /**< The Scheme type of DRM */
-	uint32_t  uiSessionID;                    /**< The identify of Session */
-	uint8_t   uiKeyID[M2M_MAX_KEY_ID_LENGTH]; /**< The identify Key */
-	uint32_t  uiKeyIdLen;                     /**< The length of key id */
-};
-
-struct m2m_key_info {
-	uint32_t  uiKeyOption;
-	uint32_t  uiKeyLength;
-	uint32_t  uiKeyTblIndex;
-	uint32_t  uiIVOption;
-	uint32_t  uiIVLength;
-	uint32_t  uiIVTblIndex;
 };
 
 struct m2m_shadow_buff {
@@ -213,7 +192,7 @@ static TEEC_Result tz_m2m_crypto_init(TEEC_Session *teec_sess)
 	return ret;
 }
 
-static TEEC_Result m2m_wrapper_alloc(unsigned int len, void **handle)
+int m2m_wrapper_alloc(unsigned int len, void **handle)
 {
 	TEEC_SharedMemory *shm;
 	TEEC_Result ret = TEEC_SUCCESS;
@@ -234,7 +213,7 @@ static TEEC_Result m2m_wrapper_alloc(unsigned int len, void **handle)
 	return ret;
 }
 
-static void m2m_wrapper_free(void *handle)
+void m2m_wrapper_free(void *handle)
 {
 	TEEC_ReleaseSharedMemory(handle);
 	kfree(handle);
@@ -270,27 +249,6 @@ int m2m_wrapper_init(struct device *dev)
 		goto error;
 	}
 
-	ret = m2m_wrapper_alloc(sizeof(struct drm_crypto_info), (void **)&pCryptoSM);
-	if (ret) {
-		pr_err("fail to alloc drm crypto shm 0x%zx\n", sizeof(struct drm_crypto_info));
-		goto error;
-	}
-	ret = m2m_wrapper_alloc(sizeof(struct m2m_key_info), (void **)&pKeyInfoSM);
-	if (ret) {
-		pr_err("fail to alloc key info shm 0x%zx\n", sizeof(struct m2m_key_info));
-		goto error;
-	}
-	ret = m2m_wrapper_alloc(M2M_MAX_KEY_LENGTH, (void **)&pKeySM);
-	if (ret) {
-		pr_err("fail to alloc key data shm %d\n", M2M_MAX_KEY_LENGTH);
-		goto error;
-	}
-	ret = m2m_wrapper_alloc(M2M_MAX_KEY_LENGTH, (void **)&pIVSM);
-	if (ret) {
-		pr_err("fail to alloc iv data shm %d\n", M2M_MAX_KEY_LENGTH);
-		goto error;
-	}
-
 	ret = tz_m2m_open_session(&dummy_sess, M2M_CRYPTO_MODE_INVALID, true);
 	if (ret) {
 		pr_err("fail to open a dummy sess\n");
@@ -311,14 +269,7 @@ error:
 	if (shadow_dma_buff.shadow_dma_addr)
 		dma_free_coherent(shadow_dma_buff.dev, TSP_FIGO_REG_SIZE * 2,
 			 shadow_dma_buff.vir, shadow_dma_buff.shadow_dma_addr);
-	if (pCryptoSM)
-		m2m_wrapper_free(pCryptoSM);
-	if (pKeyInfoSM)
-		m2m_wrapper_free(pKeyInfoSM);
-	if (pKeySM)
-		m2m_wrapper_free(pKeySM);
-	if (pIVSM)
-		m2m_wrapper_free(pIVSM);
+
 	if (ctx_created) {
 		TEEC_FinalizeContext(&teec_ctx);
 		ctx_created = false;
@@ -332,14 +283,6 @@ void m2m_wrapper_exit(void)
 	if (shadow_dma_buff.shadow_dma_addr)
 		dma_free_coherent(shadow_dma_buff.dev, TSP_FIGO_REG_SIZE * 2,
 			 shadow_dma_buff.vir, shadow_dma_buff.shadow_dma_addr);
-	if (pCryptoSM)
-		m2m_wrapper_free(pCryptoSM);
-	if (pKeyInfoSM)
-		m2m_wrapper_free(pKeyInfoSM);
-	if (pKeySM)
-		m2m_wrapper_free(pKeySM);
-	if (pIVSM)
-		m2m_wrapper_free(pIVSM);
 
 	if (ctx_created) {
 		TEEC_FinalizeContext(&teec_ctx);
@@ -472,11 +415,10 @@ end:
 	return tz_m2m_errcode_translate(ret);
 }
 
-int m2m_wrapper_config(TEEC_Session *teec_sess, struct m2m_key *key_config)
+int m2m_wrapper_config(TEEC_Session *teec_sess, struct m2m_key *key_config, struct m2m_key_iv_info *ses_key_iv_info)
 {
 	TEEC_Result ret = TEEC_SUCCESS;
 	TEEC_Operation operation;
-
 	struct m2m_key_info *pKeyInfo;
 	struct drm_crypto_info *pCryptoInfo;
 	enum TEEC_ParamType KeyDataParam = TEEC_NONE, IVDataParam = TEEC_NONE;
@@ -484,8 +426,8 @@ int m2m_wrapper_config(TEEC_Session *teec_sess, struct m2m_key *key_config)
 	/* Use TEE Client API to register the underlying memory buffer. */
 	if (key_config->key_option == M2M_KEY_CONTENT) {
 		KeyDataParam = TEEC_MEMREF_PARTIAL_INPUT;
-		if (unlikely(key_config->key_length <= pKeySM->size)) {
-			memcpy(pKeySM->buffer, key_config->key_data, key_config->key_length);
+		if (unlikely(key_config->key_length <= ses_key_iv_info->pKeySM->size)) {
+			memcpy(ses_key_iv_info->pKeySM->buffer, key_config->key_data, key_config->key_length);
 		} else {
 			pr_err("Key size is too long\n");
 			ret =  TEEC_ERROR_BAD_PARAMETERS;
@@ -495,8 +437,8 @@ int m2m_wrapper_config(TEEC_Session *teec_sess, struct m2m_key *key_config)
 
 	if (key_config->iv_option == M2M_KEY_CONTENT) {
 		IVDataParam = TEEC_MEMREF_PARTIAL_INPUT;
-		if (likely(key_config->iv_length <= pIVSM->size)) {
-			memcpy(pIVSM->buffer, key_config->iv_data, key_config->iv_length);
+		if (likely(key_config->iv_length <= ses_key_iv_info->pIVSM->size)) {
+			memcpy(ses_key_iv_info->pIVSM->buffer, key_config->iv_data, key_config->iv_length);
 		} else {
 			pr_err("IV size is too long\n");
 			ret =  TEEC_ERROR_BAD_PARAMETERS;
@@ -504,13 +446,13 @@ int m2m_wrapper_config(TEEC_Session *teec_sess, struct m2m_key *key_config)
 		}
 	}
 
-	pCryptoInfo = (struct drm_crypto_info *)pCryptoSM->buffer;
+	pCryptoInfo = (struct drm_crypto_info *)ses_key_iv_info->pCryptoSM->buffer;
 	pCryptoInfo->uiSchemeType = key_config->drm_info.scheme_type;
 	pCryptoInfo->uiSessionID = key_config->drm_info.session_id;
 	pCryptoInfo->uiKeyIdLen = key_config->drm_info.key_id_length;
 	memcpy(pCryptoInfo->uiKeyID, key_config->drm_info.key_id, M2M_MAX_KEY_ID_LENGTH);
 
-	pKeyInfo = (struct m2m_key_info *)pKeyInfoSM->buffer;
+	pKeyInfo = (struct m2m_key_info *)ses_key_iv_info->pKeyInfoSM->buffer;
 	pKeyInfo->uiKeyOption = key_config->key_option;
 	pKeyInfo->uiKeyLength = key_config->key_length;
 	pKeyInfo->uiKeyTblIndex = key_config->key_index;
@@ -526,20 +468,20 @@ int m2m_wrapper_config(TEEC_Session *teec_sess, struct m2m_key *key_config)
 			TEEC_MEMREF_PARTIAL_INPUT);
 	//use the value to represent the shm
 	//In ta env, will use params[0].memref.buffer to access
-	operation.params[0].memref.parent = pKeySM;
-	operation.params[0].memref.size = pKeySM->size;
+	operation.params[0].memref.parent = ses_key_iv_info->pKeySM;
+	operation.params[0].memref.size = ses_key_iv_info->pKeySM->size;
 	operation.params[0].memref.offset = 0;
 
-	operation.params[1].memref.parent = pIVSM;
-	operation.params[1].memref.size = pIVSM->size;
+	operation.params[1].memref.parent = ses_key_iv_info->pIVSM;
+	operation.params[1].memref.size = ses_key_iv_info->pIVSM->size;
 	operation.params[1].memref.offset = 0;
 
-	operation.params[2].memref.parent = pCryptoSM;
-	operation.params[2].memref.size = pCryptoSM->size;
+	operation.params[2].memref.parent = ses_key_iv_info->pCryptoSM;
+	operation.params[2].memref.size = ses_key_iv_info->pCryptoSM->size;
 	operation.params[2].memref.offset = 0;
 
-	operation.params[3].memref.parent = pKeyInfoSM;
-	operation.params[3].memref.size = pKeyInfoSM->size;
+	operation.params[3].memref.parent = ses_key_iv_info->pKeyInfoSM;
+	operation.params[3].memref.size = ses_key_iv_info->pKeyInfoSM->size;
 	operation.params[3].memref.offset = 0;
 
 	ret = TEEC_InvokeCommand(
