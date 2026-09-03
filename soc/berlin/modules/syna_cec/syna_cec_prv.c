@@ -2,6 +2,7 @@
 /* Copyright (C) 2025 Synaptics Incorporated */
 
 #include <linux/io.h>
+#include <linux/ktime.h>
 #include "syna_cec_prv.h"
 #include "syna_cec.h"
 
@@ -181,7 +182,7 @@ int syna_cec_set_mode (struct cec_device_t *cec_dev, syna_cec_mode cecMode,
 u8 syna_cec_rx_line_status(struct cec_device_t *cec_dev)
 {
 	u8 value;
-	syna_cec_reg_read (cec_dev, CEC_RX_PRESENT_STATE_REG_ADDR , &value, 1);
+	syna_cec_reg_read (cec_dev, CEC_LINE_STATUS_REG_ADDR , &value, 1);
 	return value;
 }
 /******************************************************************************
@@ -200,12 +201,19 @@ int syna_cec_transmit_data(struct cec_device_t *cec_dev, struct cec_msg *msg, in
 	u32 signalFreeTime;
 	int i;
 
-	if (msg == NULL)
+	if (!msg)
 		return -EINVAL;
 
-	signal_free_time += 2; //Additional 2 time frame
-	signalFreeTime = (signal_free_time * CEC_DATA_BIT_TIME);
-	// Set signal free time
+	/*
+	 * Disable HW signal-free-time enforcement. SFT is enforced in
+	 * software (syna_cec_wait_free_time) before reaching here. The
+	 * HW SFT check is unreliable, it fires TX_SFT_FAIL prematurely
+	 * instead of counting down the programmed time. Setting SFT to 0
+	 * lets the controller drive the start bit immediately on CEC_RDY.
+	 * Collision detection remains enabled.
+	 */
+	signalFreeTime = 0;
+	// Set signal free time (0 = HW SFT disabled, SW enforces it)
 	CEC_CalcTimerCount (signalFreeTime, &reg);
 	syna_cec_reg_write (cec_dev, CEC_SIGNAL_FREE_TIME_0_ADDR, (u8*)(&reg), 4);
 
@@ -294,7 +302,6 @@ static void syna_cec_enable_interrupt(struct cec_device_t *cec_dev, u16 intr,
 {
 	u8 reg;
 
-	syna_cec_reg_read (cec_dev, CEC_INTR_ENABLE0_REG_ADDR, &reg, 1);
 	if (enable) {
 		syna_cec_reg_read (cec_dev, CEC_INTR_ENABLE0_REG_ADDR, &reg, 1);
 		reg |= (intr & 0x00ff);
@@ -326,7 +333,14 @@ void syna_cec_get_fail_status(struct cec_device_t *cec_dev,
 		if (intr_status & (SYNA_CEC_INTR_TX_UNICAST_NOACK | SYNA_CEC_INTR_TX_BRDCAST_NOACK))
 			*pStsInfo = CEC_TX_STATUS_NACK;
 		else if (intr_status & SYNA_CEC_INTR_TX_COLLISION)
-			*pStsInfo = CEC_TX_STATUS_LOW_DRIVE;
+			/*
+			 * TX_COLLISION = we drove high, saw the bus low during
+			 * the source-address bits, i.e. lost arbitration. Report
+			 * ARB_LOST so the framework treats us as a new initiator
+			 * and retries with >=5 bit periods (CTS 9.6), not the
+			 * 3-bit-period retransmit that LOW_DRIVE would trigger.
+			 */
+			*pStsInfo = CEC_TX_STATUS_ARB_LOST;
 		else if (intr_status & SYNA_CEC_INTR_TX_SFT_FAIL)
 			*pStsInfo = CEC_TX_STATUS_ARB_LOST;
 		else

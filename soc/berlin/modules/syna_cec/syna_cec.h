@@ -6,6 +6,9 @@
 
 #include <linux/cec.h>
 #include <linux/cdev.h>
+#include <linux/hrtimer.h>
+#include <linux/completion.h>
+#include <linux/workqueue.h>
 
 //#define CEC_PLATFORM_DEBUG
 
@@ -163,14 +166,28 @@ struct cec_device_t {
 	u8 tx_buf[CEC_MAX_MSG_SIZE];
 	u8 tx_buf_cur;
 	u8 tx_buf_cnt;
-	u8 tx_counter;
-	ktime_t tx_time;
-	struct cec_msg  msg;
-	u32 signal_free_time_ms;
-	bool msg_in_transmit;
-	struct hrtimer rx_line_poll_timer;
-	ktime_t rx_line_poll_timer_interval;
-	bool rx_line_poll_timer_isrunning;
+	/* Software SFT enforcement */
+	struct hrtimer sft_timer;
+	struct completion sft_completion;
+	atomic_t sft_poll_cnt;
+	atomic_t sft_required_polls;
+	/*
+	 * Deferred transmit. adap_transmit() is called by the CEC core's
+	 * kthread with adap->lock held, so it must return quickly: it stashes
+	 * the message in tx_msg/tx_signal_free_time and queues tx_work. The
+	 * whole SFT wait + FIFO write then runs in tx_work (process context,
+	 * adap->lock released), so the wait never blocks RX delivery or TX
+	 * completion, and the failure completion can call cec_transmit_*_done()
+	 * without re-entering adap->lock.
+	 */
+	struct workqueue_struct *tx_wq;
+	struct work_struct tx_work;
+	struct cec_msg tx_msg;
+	u32 tx_signal_free_time;
+#ifdef CEC_HWSFT_DEBUG
+	ktime_t tx_rdy_time;
+	u32 tx_sft_us;
+#endif
 };
 
 

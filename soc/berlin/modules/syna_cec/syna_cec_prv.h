@@ -44,21 +44,6 @@
 // Command queue size
 #define CEC_MAX_FIFO_SIZE  32
 
-// Maximum retransmission count in case of transmission failure
-// Android also has retries so retry count is reduced here
-#define CEC_MAX_RETX_COUNT 2
-
-// Conditions on which retransmission should be attempted
-#define CEC_RETX_CONDN      (SYNA_CEC_INTR_TX_FAIL_NOACK | \
-                            SYNA_CEC_INTR_TX_FAIL_RESP_TIMEOUT | \
-                            SYNA_CEC_INTR_TX_FAIL_INFO_NONE | \
-                            SYNA_CEC_INTR_TX_FAIL_COLL_DET)
-
-// Maximum time-out for Tx msg interrupt (just for safety in case we miss interrupt or system failure)
-#define CEC_MSG_TX_TOTAL_TIMEOUT (36000)
-// Maximum time-out for message transmit
-#define CEC_MSG_TX_TIMEOUT (600000000) //600ms
-
 // Broadcast logical address
 #define CEC_BROADCAST_ADDR  0x0F
 
