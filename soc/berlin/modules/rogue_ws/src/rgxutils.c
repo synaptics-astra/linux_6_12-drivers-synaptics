@@ -351,9 +351,10 @@ IMG_UINT32 RGXCalcMListSize(PVRSRV_DEVICE_NODE *psDeviceNode,
 	}
 
 	/* Calculate the maximum number of TA/VCE pipes */
-#if defined(RGX_FEATURE_SCALABLE_TE_ARCH_IDX)
+#if defined(RGX_FEATURE_NUM_RASTER_PIPES_MAX_VALUE_IDX)
+	if (RGX_IS_FEATURE_VALUE_SUPPORTED(psDevInfo, NUM_RASTER_PIPES))
 	{
-		IMG_UINT32 ui32Val = RGX_GET_FEATURE_VALUE(psDevInfo, RGX_FEATURE_SCALABLE_TE_ARCH);
+		IMG_UINT32 ui32Val = RGX_GET_FEATURE_VALUE(psDevInfo, NUM_RASTER_PIPES);
 		if (ui32Val > ui32NumOfPipes)
 		{
 			ui32NumOfPipes = ui32Val;
@@ -363,7 +364,17 @@ IMG_UINT32 RGXCalcMListSize(PVRSRV_DEVICE_NODE *psDeviceNode,
 
 #if defined(RGX_FEATURE_SCALABLE_TE_ARCH_IDX)
 	{
-		IMG_UINT32 ui32Val = RGX_GET_FEATURE_VALUE(psDevInfo, RGX_FEATURE_SCALABLE_VCE);
+		IMG_UINT32 ui32Val = RGX_GET_FEATURE_VALUE(psDevInfo, SCALABLE_TE_ARCH);
+		if (ui32Val > ui32NumOfPipes)
+		{
+			ui32NumOfPipes = ui32Val;
+		}
+	}
+#endif
+
+#if defined(RGX_FEATURE_SCALABLE_VCE_IDX)
+	{
+		IMG_UINT32 ui32Val = RGX_GET_FEATURE_VALUE(psDevInfo, SCALABLE_VCE);
 		if (ui32Val > ui32NumOfPipes)
 		{
 			ui32NumOfPipes = ui32Val;
