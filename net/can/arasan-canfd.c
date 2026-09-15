@@ -309,9 +309,6 @@ static void arasan_canfd_init(struct arasan_canfd_priv *priv)
 	u32 val;
 	int i;
 
-	arasan_canfd_write(priv, INTERRUPT_MASK0, 0);
-	arasan_canfd_write(priv, INTERRUPT_MASK1, 0);
-
 	/* soft reset */
 	val = arasan_canfd_read(priv, CONTROL);
 	val |= (SOFTRESET | DMA_SOFTRESET);
@@ -319,6 +316,9 @@ static void arasan_canfd_init(struct arasan_canfd_priv *priv)
 	udelay(1);
 	val &= ~(SOFTRESET | DMA_SOFTRESET);
 	arasan_canfd_write(priv, CONTROL, val);
+
+	arasan_canfd_write(priv, INTERRUPT_MASK0, 0);
+	arasan_canfd_write(priv, INTERRUPT_MASK1, 0);
 
 	/* setup features */
 	val |= LVL_ISOFD;
@@ -361,10 +361,6 @@ static int arasan_canfd_chip_start(struct net_device *ndev)
 	if (ret < 0)
 		return ret;
 
-	ier = GENMASK(31, 0);
-	ier &= ~(GOOD_RX_FRAME | TX_FIFO_EMPTY | CLTX_GOOD | FDTX_GOOD | PANICS);
-	arasan_canfd_write(priv, INTERRUPT_MASK0, ier);
-
 	/* loopback? */
 	if (priv->can.ctrlmode & CAN_CTRLMODE_LOOPBACK)
 		op |= LOOPBACK;
@@ -373,10 +369,15 @@ static int arasan_canfd_chip_start(struct net_device *ndev)
 	ctrl |= DONTCHECKID;
 	arasan_canfd_write(priv, CONTROL, ctrl);
 
-	arasan_canfd_write(priv, OPERATIONAL, op);
-
 	priv->txq_avail = GENMASK(CAN_MAX_TX_QUEUE - 1, 0);
 	priv->can.state = CAN_STATE_ERROR_ACTIVE;
+
+	ier = USED_BUFFERS_NOT_EMPTY | OVERLOAD | TX_RETRANSMIT | ERROR_RX_FRAME |
+		CL_NO_ACK | FD_NO_ACK | BUS_STATE1 | BUS_STATE2;
+	arasan_canfd_write(priv, INTERRUPT_MASK0, ier);
+
+	arasan_canfd_write(priv, OPERATIONAL, op);
+
 	return 0;
 }
 
@@ -781,8 +782,8 @@ static irqreturn_t arasan_canfd_isr(int irq, void *dev_id)
 
 	arasan_canfd_write(priv, INTERRUPTS_FROM_HW, isr);
 
-	ier = GENMASK(31, 0);
-	ier &= ~(GOOD_RX_FRAME | TX_FIFO_EMPTY | CLTX_GOOD | FDTX_GOOD | USED_BUFFERS_NOT_EMPTY);
+	ier = OVERLOAD | ERROR_RX_FRAME | TX_RETRANSMIT | CL_NO_ACK | FD_NO_ACK |
+		BUS_STATE2 | BUS_STATE1;
 	isr_errors = isr & ier;
 	if (isr_errors)
 		arasan_canfd_err_interrupt(ndev, isr_errors);
