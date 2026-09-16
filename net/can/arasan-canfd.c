@@ -240,7 +240,7 @@ static inline int parity(unsigned int x)
 	return (x >> 28) & 1;
 }
 
-static u8 ecc_calc(u32 data)
+static inline u8 ecc_calc(u32 data)
 {
 	int i;
 	u8 result = 0;
@@ -372,8 +372,10 @@ static int arasan_canfd_chip_start(struct net_device *ndev)
 	priv->txq_avail = GENMASK(CAN_MAX_TX_QUEUE - 1, 0);
 	priv->can.state = CAN_STATE_ERROR_ACTIVE;
 
-	ier = USED_BUFFERS_NOT_EMPTY | OVERLOAD | TX_RETRANSMIT | ERROR_RX_FRAME |
-		CL_NO_ACK | FD_NO_ACK | BUS_STATE1 | BUS_STATE2;
+	ier = USED_BUFFERS_NOT_EMPTY | BUS_STATE1 | BUS_STATE2;
+	if (priv->can.ctrlmode & CAN_CTRLMODE_BERR_REPORTING)
+		ier |= OVERLOAD | ERROR_RX_FRAME | CL_NO_ACK | FD_NO_ACK;
+
 	arasan_canfd_write(priv, INTERRUPT_MASK0, ier);
 
 	arasan_canfd_write(priv, OPERATIONAL, op);
@@ -546,8 +548,10 @@ static int arasan_canfd_start_xmit_queue(struct sk_buff *skb, struct net_device 
 	guard(spinlock)(&priv->tx_lock);
 
 	idx = ffs(priv->txq_avail);
-	if (unlikely(!idx))
+	if (unlikely(!idx)) {
+		netif_stop_queue(ndev);
 		return -ENOSPC;
+	}
 
 	--idx;
 	priv->txq_avail &= ~BIT(idx);
@@ -574,7 +578,6 @@ static netdev_tx_t arasan_canfd_start_xmit(struct sk_buff *skb, struct net_devic
 	ret = arasan_canfd_start_xmit_queue(skb, ndev);
 	if (ret < 0) {
 		netdev_err(ndev, "BUG!, TX full when queue awake!\n");
-		netif_stop_queue(ndev);
 		return NETDEV_TX_BUSY;
 	}
 
@@ -624,7 +627,8 @@ static int arasan_canfd_tx(struct net_device *ndev, dma_addr_t addr, bool aborte
 	}
 	priv->txq_avail |= BIT(idx);
 
-	netif_wake_queue(ndev);
+	if (netif_queue_stopped(ndev))
+		netif_wake_queue(ndev);
 
 	return 1;
 }
@@ -782,14 +786,12 @@ static irqreturn_t arasan_canfd_isr(int irq, void *dev_id)
 
 	arasan_canfd_write(priv, INTERRUPTS_FROM_HW, isr);
 
-	ier = OVERLOAD | ERROR_RX_FRAME | TX_RETRANSMIT | CL_NO_ACK | FD_NO_ACK |
-		BUS_STATE2 | BUS_STATE1;
+	ier = arasan_canfd_read(priv, INTERRUPT_MASK0);
 	isr_errors = isr & ier;
 	if (isr_errors)
 		arasan_canfd_err_interrupt(ndev, isr_errors);
 
 	if (isr & USED_BUFFERS_NOT_EMPTY) {
-		ier = arasan_canfd_read(priv, INTERRUPT_MASK0);
 		ier &= ~USED_BUFFERS_NOT_EMPTY;
 		arasan_canfd_write(priv, INTERRUPT_MASK0, ier);
 		napi_schedule(&priv->napi);
