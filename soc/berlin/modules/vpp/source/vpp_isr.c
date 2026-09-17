@@ -20,12 +20,9 @@ extern vpp_config_params vpp_config_param;
 
 #define HPD_CHECK_TIMEOUT  10*HZ
 static AMPMsgQ_t *hVPPIntrQ;
-static AMPMsgQ_t *hVPPTAQ;
 static AMPMsgQ_t hVPPInputFrameQ;
 static struct semaphore vpp_sem;
 static struct task_struct *vpp_isr_task;
-static struct semaphore vpp_ta_sem;
-static struct task_struct *vpp_ta_task;
 
 static struct semaphore vpp_vsync_sem;
 static struct semaphore vpp_vsync1_sem;
@@ -132,30 +129,6 @@ static void VPP_DisplayPreISRService(void)
 	} while (rc == S_OK);
 }
 
-static int VPP_TA_Task(void *param)
-{
-	CC_MSG_t msg;
-	HRESULT rc = MV_VPP_OK;
-	int intr_num;
-
-	while (!kthread_should_stop()) {
-		rc = down_interruptible(&vpp_ta_sem);
-		if (unlikely(rc < 0))
-			return rc;
-		rc = AMPMsgQ_DequeueRead(hVPPTAQ, &msg);
-		if (unlikely(!rc))
-			continue;
-
-		VPP_DisplayPreISRService();
-
-		intr_num = msg.m_Param1;
-		msg.m_Param1 = bSETMASK(msg.m_Param1);
-		wrap_MV_VPPOBJ_IsrHandler(msg.m_MsgID, msg.m_Param1);
-	}
-
-	return 0;
-}
-
 static int VPP_ISR_Task(void *param)
 {
 	CC_MSG_t msg;
@@ -169,12 +142,12 @@ static int VPP_ISR_Task(void *param)
 		rc = AMPMsgQ_DequeueRead(hVPPIntrQ, &msg);
 		if (unlikely(!rc))
 			continue;
-		rc = AMPMsgQ_Add(hVPPTAQ, &msg);
-		if (likely(rc == S_OK))
-			up(&vpp_ta_sem);
+
+		VPP_DisplayPreISRService();
 
 		intr_num = msg.m_Param1;
 		msg.m_Param1 = bSETMASK(msg.m_Param1);
+		wrap_MV_VPPOBJ_IsrHandler(msg.m_MsgID, msg.m_Param1);
 #if defined VPP_DHUB_HDMITX_HPD_INTR  //all chips doesn't have hdmi interface
 		if (bSETMASK(VPP_DHUB_HDMITX_HPD_INTR) == msg.m_Param1)
 			up(&vpp_hdmitx_hpd_sem);
@@ -197,7 +170,6 @@ void VPP_CreateISRTask(void)
 	AMPMsgQ_t *hVPPtmpIntrQ;
 
 	sema_init(&vpp_sem, 0);
-	sema_init(&vpp_ta_sem, 0);
 	sema_init(&vpp_vsync_sem, 0);
 	sema_init(&vpp_vsync1_sem, 0);
 	sema_init(&vpp_hdmitx_hpd_sem, 0);
@@ -217,17 +189,6 @@ void VPP_CreateISRTask(void)
 		else
 			hVPPIntrQ = hVPPtmpIntrQ;
 	}
-
-	hVPPtmpIntrQ = kmalloc(sizeof(AMPMsgQ_t), GFP_KERNEL);
-	if (unlikely(!hVPPtmpIntrQ)) {
-		pr_err("%s:%d: VPP MsgQ init mem alloc FAILED\n", __func__, __LINE__);
-	} else {
-		err = AMPMsgQ_Init(hVPPtmpIntrQ, VPP_ISR_MSGQ_SIZE);
-		if (unlikely(err != S_OK))
-			pr_err("%s:%d: VPP MsgQ init FAILED, err:%8x\n", __func__, __LINE__, err);
-		else
-			hVPPTAQ = hVPPtmpIntrQ;
-	}
 	//Register Callback to wait for VPP VSYNC
 	wrap_MV_VPP_RegisterWaitForVppVsyncCb(wait_vpp_primary_vsync);
 
@@ -238,11 +199,6 @@ void VPP_CreateISRTask(void)
 	if (IS_ERR(vpp_isr_task))
 		return;
 	sched_set_fifo(vpp_isr_task);
-
-	vpp_ta_task = kthread_run(VPP_TA_Task, NULL, "VPP TA Thread");
-	if (IS_ERR(vpp_ta_task))
-		return;
-	sched_set_fifo(vpp_ta_task);
 }
 
 void VPP_StopISRTask(void)
@@ -254,19 +210,6 @@ void VPP_StopISRTask(void)
 	do {
 		err = AMPMsgQ_DequeueRead(hVPPIntrQ, &msg);
 	} while (likely(err == 1));
-
-	kthread_stop(vpp_ta_task);
-	do {
-		err = AMPMsgQ_DequeueRead(hVPPTAQ, &msg);
-	} while (likely(err == 1));
-	sema_init(&vpp_ta_sem, 0);
-	if (hVPPTAQ) {
-		err = AMPMsgQ_Destroy(hVPPTAQ);
-		if (unlikely(err != S_OK))
-			pr_err("%s:%d: VPP TA MsgQ Destroy FAILED, err:%8x\n", __func__, __LINE__, err);
-		else
-			kfree(hVPPTAQ);
-	}
 	sema_init(&vpp_sem, 0);
 	err = AMPMsgQ_Destroy(hVPPIntrQ);
 	if (unlikely(err != S_OK))
