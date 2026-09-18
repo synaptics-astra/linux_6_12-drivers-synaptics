@@ -236,6 +236,28 @@ static int mcm_subdev_buf_queue(struct v4l2_subdev *sd, void *arg)
 	return 0;
 }
 
+static int mcm_subdev_recycle_buffer(struct mcm_subdev_dev *mcm_dev,
+		struct mcm_pad_data *cur_pad, struct vvcam_vb2_buffer *buf,
+		int source_pad_index, unsigned int index)
+{
+	int qbuf_ret = 0;
+
+	mutex_lock(&cur_pad->q_lock);
+	list_add_tail(&buf->list, &cur_pad->queue);
+	mutex_unlock(&cur_pad->q_lock);
+
+	qbuf_ret = mcm_qbuf_event(mcm_dev, source_pad_index, buf);
+	if (qbuf_ret) {
+		mutex_lock(&cur_pad->q_lock);
+		list_del_init(&buf->list);
+		mutex_unlock(&cur_pad->q_lock);
+		pr_err("%s: pad %u buffer %u recycle failed, ret %d\n",
+			__func__, source_pad_index, index, qbuf_ret);
+	}
+
+	return qbuf_ret;
+}
+
 /* Called from the user space. Finds the buffer that matches the index passed,
  * and calls vb2_buffer_done on that buffer if the raw_frame_dump is enabled
  */
@@ -247,6 +269,8 @@ static int mcm_subdev_buf_done(struct v4l2_subdev *sd, void *arg)
 	struct vvcam_vb2_buffer *buf = NULL;
 	struct mcm_buf ubuf;
 	int source_pad_index;
+	int ret = 0;
+	bool skip_first_mcm_frame = false;
 
 	memcpy(&ubuf, arg, sizeof(struct mcm_buf));
 	source_pad_index = (ubuf.pad * MCM_CHN_MAX) + 1;
@@ -264,6 +288,10 @@ static int mcm_subdev_buf_done(struct v4l2_subdev *sd, void *arg)
 		if (pos && (pos->sequence == ubuf.index)) {
 			buf = pos;
 			list_del(&pos->list);
+			if (cur_pad->skip_first_mcm_frame) {
+				skip_first_mcm_frame = true;
+				cur_pad->skip_first_mcm_frame = false;
+			}
 			break;
 		}
 	}
@@ -274,7 +302,15 @@ static int mcm_subdev_buf_done(struct v4l2_subdev *sd, void *arg)
 				cur_pad->sensor_out_state == SENSOR_OUT_ENABLE_MCM_MMU_DISABLE) {
 			if (buf->vb.vb2_buf.state == VB2_BUF_STATE_ACTIVE) {
 				buf->vb.vb2_buf.timestamp = ktime_get();
-				vb2_buffer_done(&buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
+				if (skip_first_mcm_frame) {
+					ret = mcm_subdev_recycle_buffer(mcm_dev, cur_pad, buf,
+							source_pad_index, ubuf.index);
+					if (ret)
+						vb2_buffer_done(&buf->vb.vb2_buf,
+								VB2_BUF_STATE_ERROR);
+				} else {
+					vb2_buffer_done(&buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
+				}
 			}
 		}
 
@@ -312,6 +348,7 @@ static int mcm_s_stream(struct v4l2_subdev *sd, void *arg)
 		ISPSS_MTR_Exit(wrpath);
 		ISPSS_MTR_Exit(rdpath);
 		cur_pad->first_frame = true;
+		cur_pad->skip_first_mcm_frame = false;
 		/* Gst/test application itself will free the raw dump buffers. We just need to
 		 * clear the queue here
 		 */
@@ -319,6 +356,7 @@ static int mcm_s_stream(struct v4l2_subdev *sd, void *arg)
 				cur_pad->sensor_out_state == SENSOR_OUT_ENABLE_MCM_MMU_DISABLE)
 			INIT_LIST_HEAD(&cur_pad->queue);
 	} else if (cur_pad->stream == 1 && mcm_stream->status == 1) {
+		cur_pad->skip_first_mcm_frame = true;
 		/* Only for first stream on, both the above will be 1 */
 		if (cur_pad->sensor_out_state == SENSOR_OUT_DISABLE_MCM_MMU_DISABLE ||
 				cur_pad->sensor_out_state == SENSOR_OUT_DISABLE_MCM_MMU_ENABLE)

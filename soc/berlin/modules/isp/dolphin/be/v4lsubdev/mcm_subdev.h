@@ -31,6 +31,7 @@ struct mcm_pad_data {
 	uint32_t stream;
 	uint8_t sensor_out_state;
 	bool first_frame;
+	bool skip_first_mcm_frame;
 	uint8_t num_alloc_buf;
 };
 

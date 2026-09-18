@@ -125,6 +125,9 @@ struct vvcam_isp_pad_data {
     //spinlock_t qlock;
     struct mutex q_lock;
     uint32_t stream;
+#ifdef DOLPHIN
+    bool skip_first_frame;
+#endif
 };
 
 struct vvcam_isp_event_shm {

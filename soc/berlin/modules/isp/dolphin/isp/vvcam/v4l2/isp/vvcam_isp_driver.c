@@ -722,7 +722,9 @@ static int vvcam_isp_pad_s_stream(struct v4l2_subdev *sd, void *arg)
         /* cur_pad->stream should be enabled after stream ON, so process_pad_buffers/
          * ISPSS_MTR_ConfigureMtr is not called until stream ON execution is complete
          */
+        mutex_lock(&cur_pad->q_lock);
         cur_pad->stream = pad_stream->param.status;
+        mutex_unlock(&cur_pad->q_lock);
         pad_stream->param.ctrl_ctx.dnr3_mmu_en = isp_dev->dnr3_mmu_enable;
     }
 
@@ -750,6 +752,18 @@ static int vvcam_isp_pad_s_stream(struct v4l2_subdev *sd, void *arg)
 
     if (!ret)
         ret = vvcam_isp_s_stream_event(isp_dev, pad_stream->pad, &pad_stream->param);
+    if (!ret && pad_stream->param.status) {
+        if (isp_dev->mcm_mode != ISP_MCM_MODE_ENABLED) {
+            mutex_lock(&cur_pad->q_lock);
+            cur_pad->skip_first_frame = true;
+            mutex_unlock(&cur_pad->q_lock);
+            pr_debug("%s: pad %u stream ON, first frame will be skipped\n",
+                    __func__, pad_stream->pad);
+        }
+        } else if (ret && pad_stream->param.status) {
+                pr_err("%s: pad %u stream ON failed, ret %d\n",
+                                __func__, pad_stream->pad, ret);
+        }
     /* driver can return an error if hardware fails, in that
      * case all buffers that have been already given by
      * the @buf_queue callback are to be returned by the driver
@@ -801,6 +815,32 @@ static int process_bcm(void *arg)
 }
 #endif
 
+#ifdef DOLPHIN
+static int vvcam_isp_recycle_buffer(struct vvcam_isp_dev *isp_dev,
+        struct vvcam_isp_pad_data *cur_pad,
+        struct vvcam_vb2_buffer *buf, unsigned int pad,
+        unsigned int index)
+{
+    int qbuf_ret = 0;
+
+    if (cur_pad->mmu_enabled)
+        buf->is_pushed_queue = 0;
+    mutex_lock(&cur_pad->q_lock);
+    list_add_tail(&buf->list, &cur_pad->queue);
+    mutex_unlock(&cur_pad->q_lock);
+    qbuf_ret = vvcam_isp_qbuf_event(isp_dev, pad, buf);
+    if (qbuf_ret) {
+        mutex_lock(&cur_pad->q_lock);
+        list_del_init(&buf->list);
+        mutex_unlock(&cur_pad->q_lock);
+        pr_err("%s: pad %u buffer %u recycle failed, ret %d\n",
+                __func__, pad, index, qbuf_ret);
+    }
+
+    return qbuf_ret;
+}
+#endif
+
 static int vvcam_isp_buf_done(struct v4l2_subdev *sd, void *arg)
 {
     struct vvcam_isp_buf ubuf;
@@ -813,6 +853,9 @@ static int vvcam_isp_buf_done(struct v4l2_subdev *sd, void *arg)
     struct video_device *video;
     struct vvcam_pad_buf pad_buf;
     int ret = 0;
+#ifdef DOLPHIN
+    bool skip_first_frame = false;
+#endif
 
     memcpy(&ubuf, arg, sizeof(struct vvcam_isp_buf));
 
@@ -831,6 +874,14 @@ static int vvcam_isp_buf_done(struct v4l2_subdev *sd, void *arg)
             break;
         }
     }
+
+#ifdef DOLPHIN
+    if (buf && isp_dev->mcm_mode != ISP_MCM_MODE_ENABLED &&
+            cur_pad->skip_first_frame) {
+        skip_first_frame = true;
+        cur_pad->skip_first_frame = false;
+    }
+#endif
 
     mutex_unlock(&cur_pad->q_lock);
 
@@ -856,7 +907,6 @@ static int vvcam_isp_buf_done(struct v4l2_subdev *sd, void *arg)
                 pr_err("%s: Error Remote Subdev call fails\n" , __func__);
                 goto out;
             }
-
         } else if (is_media_entity_v4l2_video_device(pad->entity)) {
             video = media_entity_to_video_device(pad->entity);
             if (buf->sequence < vb2_get_num_buffers(video->queue)) {
@@ -865,7 +915,13 @@ static int vvcam_isp_buf_done(struct v4l2_subdev *sd, void *arg)
 #ifndef DOLPHIN
                     vb2_buffer_done(&buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
 #else
-                    if((cur_pad->mmu_enabled) && !buf->is_pushed_queue) {
+                    if (skip_first_frame) {
+                        ret = vvcam_isp_recycle_buffer(isp_dev, cur_pad, buf,
+                                ubuf.pad, ubuf.index);
+                        if (ret)
+                            vb2_buffer_done(&buf->vb.vb2_buf,
+                                    VB2_BUF_STATE_ERROR);
+                    } else if (cur_pad->mmu_enabled && !buf->is_pushed_queue) {
                         pr_err("buffer not pushed to MTR for pad %d index %d\n",
                                 ubuf.pad, ubuf.index);
                         vb2_buffer_done(&buf->vb.vb2_buf, VB2_BUF_STATE_ERROR);
