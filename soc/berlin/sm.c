@@ -576,13 +576,19 @@ static long bsm_unlocked_ioctl(struct file *file,
 		return 0;
 
 	if (cmd == SM_BT_INFO) {
+
+		/* with timeout, ioctl won't block here. */
+		ret = wait_event_interruptible_timeout(priv->wait_q, priv->bt_event, msecs_to_jiffies(1000));
+		if (ret < 0) {
+			pr_warn("bt wakeup wait fails\n");
+			return ret;
+		}
+
+		/* update and return the new value after wait_event*/
 		p_itcm = (struct itcm_bt_info *)SM_BT_INFO_ADDR;
 		val.times = p_itcm->times;
 		val.level = p_itcm->level;
 
-		ret = wait_event_interruptible(priv->wait_q, priv->bt_event);
-		if (ret)
-			return ret;
 
 		if (copy_to_user((void __user *)arg, (void *)&val, sizeof(val)))
 			return -EFAULT;
