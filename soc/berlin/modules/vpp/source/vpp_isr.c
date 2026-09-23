@@ -69,6 +69,17 @@ static int VPP_IRQ_Handler(unsigned int irq, void *dev_id)
 		up(&vpp_sem);
 
 EXIT_ISR:
+
+#if defined VPP_DHUB_HDMITX_HPD_INTR  //all chips doesn't have hdmi interface
+	if (bSETMASK(VPP_DHUB_HDMITX_HPD_INTR) == intr_num)
+		up(&vpp_hdmitx_hpd_sem);
+	else
+#endif
+		VPP_SIGNAL_VSYNC(vpp_config_param.display_mode,
+			intr_num,
+			&vpp_vsync_sem,
+			&vpp_vsync1_sem);
+
 	return IRQ_HANDLED;
 }
 
@@ -148,15 +159,6 @@ static int VPP_ISR_Task(void *param)
 		intr_num = msg.m_Param1;
 		msg.m_Param1 = bSETMASK(msg.m_Param1);
 		wrap_MV_VPPOBJ_IsrHandler(msg.m_MsgID, msg.m_Param1);
-#if defined VPP_DHUB_HDMITX_HPD_INTR  //all chips doesn't have hdmi interface
-		if (bSETMASK(VPP_DHUB_HDMITX_HPD_INTR) == msg.m_Param1)
-			up(&vpp_hdmitx_hpd_sem);
-		else
-#endif
-			VPP_SIGNAL_VSYNC(vpp_config_param.display_mode,
-				intr_num,
-				&vpp_vsync_sem,
-				&vpp_vsync1_sem);
 
 		atomic_dec(&vppintr_cnt[intr_num]);
 	}
