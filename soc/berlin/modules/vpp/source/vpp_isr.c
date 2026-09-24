@@ -57,7 +57,7 @@ static int VPP_IRQ_Handler(unsigned int irq, void *dev_id)
 	intr_num = ffs(irq) - 1;
 
 	if (atomic_read(&vppintr_cnt[intr_num]))
-		goto EXIT_ISR;
+		goto EXIT_ISR1;
 	else
 		atomic_inc(&vppintr_cnt[intr_num]);
 
@@ -68,7 +68,7 @@ static int VPP_IRQ_Handler(unsigned int irq, void *dev_id)
 	if (likely(rc == S_OK))
 		up(&vpp_sem);
 
-EXIT_ISR:
+EXIT_ISR1:
 
 #if defined VPP_DHUB_HDMITX_HPD_INTR  //all chips doesn't have hdmi interface
 	if (bSETMASK(VPP_DHUB_HDMITX_HPD_INTR) == intr_num)
@@ -80,6 +80,7 @@ EXIT_ISR:
 			&vpp_vsync_sem,
 			&vpp_vsync1_sem);
 
+EXIT_ISR:
 	return IRQ_HANDLED;
 }
 
