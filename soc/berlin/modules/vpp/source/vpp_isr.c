@@ -71,7 +71,7 @@ static int VPP_IRQ_Handler(unsigned int irq, void *dev_id)
 EXIT_ISR1:
 
 #if defined VPP_DHUB_HDMITX_HPD_INTR  //all chips doesn't have hdmi interface
-	if (bSETMASK(VPP_DHUB_HDMITX_HPD_INTR) == intr_num)
+	if (VPP_DHUB_HDMITX_HPD_INTR == intr_num)
 		up(&vpp_hdmitx_hpd_sem);
 	else
 #endif
