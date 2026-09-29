@@ -57,8 +57,6 @@ struct frame_info {
 	enum v4l2_field             field;
 	u32                         bytesperline;
 	u32                         sizeimage;
-	u32                         bytesperline1;   /* (UV) stride, for multi-planar formats */
-	u32                         sizeimage1;      /* (UV) size, for multi-planar formats */
 	struct v4l2_rect            crop;
 	u8                          mtr_mode;
 	void                        *paddr[4];

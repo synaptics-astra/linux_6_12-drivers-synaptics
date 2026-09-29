@@ -683,6 +683,7 @@ static UINT32 ISPSS_BE_MTR_GetStride(UINT32 m_srcfmt, UINT32 *stride_64B, UINT32
 	case ISPSS_SRCFMT_YUV422SP:
 	case ISPSS_SRCFMT_YUV420SP:
 	case ISPSS_SRCFMT_YUV422P:
+	case ISPSS_SRCFMT_YUV444P:
 		if (m_bits_per_pixel == 8)
 			*stride_64B = DIV_ROUND_UP(pictureWidth, 256) * 4;
 		else
@@ -690,9 +691,6 @@ static UINT32 ISPSS_BE_MTR_GetStride(UINT32 m_srcfmt, UINT32 *stride_64B, UINT32
 		break;
 	case ISPSS_SRCFMT_RGB888:
 		*stride_64B = DIV_ROUND_UP(pictureWidth * 3, 256) * 4;
-		break;
-	case ISPSS_SRCFMT_YUV444P:
-		*stride_64B = (DIV_ROUND_UP((pictureWidth * 3), 256)) * 4;
 		break;
 	case ISPSS_SRCFMT_YUV422SP_DWA:
 	case ISPSS_SRCFMT_YUV420SP_DWA:
@@ -770,7 +768,6 @@ static UINT32 ISPSS_BE_MTR_UpdateReadDesc(struct BCMBUF *pbcmbuf,
 	UINT32 uiRetVal = ISPSS_BE_MTR_SUCCESS;
 	struct ISPSS_BE_MTR_MTRR_Prog sIspmtrMtrProg;
 	UINT8 threadID_Y = 0xFF, threadID_UV = 0xFF;
-	UINT32 stride_width;
 	BOOL kickOffEn = 0;
 	UINT32 stride_64B = 0;
 
@@ -788,13 +785,8 @@ static UINT32 ISPSS_BE_MTR_UpdateReadDesc(struct BCMBUF *pbcmbuf,
 	else
 		kickOffEn = 0;
 
-	if (psIspmtr->m_srcfmt == ISPSS_SRCFMT_YUV444P)
-		stride_width = psIspmtr->m_active_width;
-	else
-		stride_width = psIspmtr->m_content_width;
-
 	ISPSS_BE_MTR_GetStride(psIspmtr->m_srcfmt, &stride_64B,
-				stride_width, psIspmtr->m_bits_per_pixel);
+				psIspmtr->m_content_width, psIspmtr->m_bits_per_pixel);
 
 	sIspmtrMtrProg.ispmtrMtrrCfg.ucfg_enable		= 0;
 	sIspmtrMtrProg.ispmtrMmuCfg.upbm_stride_64B		=  stride_64B;
