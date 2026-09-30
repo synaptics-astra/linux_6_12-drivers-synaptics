@@ -113,6 +113,9 @@ static int syna_devfreq_target(struct device *dev, unsigned long *freq, u32 flag
 	struct clk *clk_parent;
 	int ret;
 
+	if (!priv || !priv->clk_num || priv->clk_num > max_clk_num)
+		return -EINVAL;
+
 	opp = devfreq_recommended_opp(dev, freq, flags);
 	if(IS_ERR(opp)) {
 		dev_err(dev, "fail to find opp!\n");
@@ -228,7 +231,7 @@ static int dvfs_probe(struct platform_device *pdev)
 	struct devm *priv;
 	struct device *dev = &pdev->dev;
 	const char *clk_name;
-	int ret, i;
+	int clk_count, ret, i;
 
 	priv = devm_kzalloc(dev, sizeof(struct devm), GFP_KERNEL);
 	if (!priv) {
@@ -249,11 +252,12 @@ static int dvfs_probe(struct platform_device *pdev)
 		}
 	}
 
-	priv->clk_num = of_property_count_strings(dev->of_node, "clock-names") - 2;
-	if (priv->clk_num > max_clk_num) {
-		dev_err(dev,"larger than max clock number!\n");
-		return -ENOMEM;
+	clk_count = of_property_count_strings(dev->of_node, "clock-names");
+	if (clk_count < 3 || clk_count > max_clk_num + 2) {
+		dev_err(dev, "invalid clock number: %d\n", clk_count);
+		return -EINVAL;
 	}
+	priv->clk_num = clk_count - 2;
 
 	for (i = 0; i < priv->clk_num; i++) {
 		ret = of_property_read_string_index(dev->of_node, "clock-names", i, &clk_name);
